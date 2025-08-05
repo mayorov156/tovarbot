@@ -254,22 +254,7 @@ async def admin_stats_callback(callback: CallbackQuery, session: AsyncSession ):
 
 
 
-@admin_router.callback_query(F.data == "admin_categories")
-async def admin_categories_callback(callback: CallbackQuery):
-    """Управление категориями (заглушка)"""
-    if not is_admin(callback.from_user.id):
-        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
-        return
-    
-    text = "📂 <b>Управление категориями</b>\n\n"
-    text += "Функционал в разработке.\n"
-    text += "Для управления категориями используйте базу данных напрямую."
-    
-    await callback.message.edit_text(
-        text,
-        reply_markup=back_button("admin_menu")
-    )
-    await callback.answer()
+# admin_categories удален - упрощена админ-панель
 
 
 @admin_router.callback_query(F.data == "admin_settings")

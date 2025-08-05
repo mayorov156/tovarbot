@@ -219,3 +219,8 @@ def no_categories_warning_kb() -> InlineKeyboardMarkup:
     )
     
     return builder.as_markup()
+
+
+def mass_add_confirmation_kb() -> InlineKeyboardMarkup:
+    """Клавиатура подтверждения массового добавления"""
+    return confirmation_kb("warehouse_confirm_mass_add")

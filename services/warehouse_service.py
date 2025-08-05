@@ -150,20 +150,56 @@ class WarehouseService:
         """Получить все активные категории"""
         return await self.category_repo.get_active_categories()
     
+    async def get_category_by_id(self, category_id: int) -> Optional[Category]:
+        """Получить категорию по ID"""
+        return await self.category_repo.get_by_id(category_id)
+    
     async def find_user_by_username_or_id(self, identifier: str) -> Optional[User]:
-        """Найти пользователя по username или ID"""
+        """Найти пользователя по username или ID с нормализацией ввода"""
         try:
-            # Пробуем как ID
+            # Нормализуем ввод
+            identifier = self.normalize_user_input(identifier)
+            
+            if not identifier:
+                return None
+            
+            # Пробуем как ID (только цифры)
             if identifier.isdigit():
                 user_id = int(identifier)
-                return await self.user_repo.get_by_id(user_id)
+                user = await self.user_repo.get_by_id(user_id)
+                if user:
+                    logger.info(f"WAREHOUSE: Found user by ID {user_id}: @{user.username or 'no_username'}")
+                    return user
             
-            # Пробуем как username
-            return await self.user_repo.get_by_username(identifier)
+            # Ищем по username
+            user = await self.user_repo.get_by_username(identifier)
+            if user:
+                logger.info(f"WAREHOUSE: Found user by username {identifier}: ID {user.id}")
+                return user
+            
+            logger.warning(f"WAREHOUSE: User not found by identifier: {identifier}")
+            return None
             
         except Exception as e:
-            logger.error(f"Error finding user: {e}")
+            logger.error(f"Error finding user by identifier {identifier}: {e}")
             return None
+    
+    def normalize_user_input(self, user_input: str) -> str:
+        """Нормализация пользовательского ввода для поиска"""
+        if not user_input:
+            return ""
+        
+        # Убираем лишние пробелы
+        normalized = user_input.strip()
+        
+        # Убираем @ в начале
+        if normalized.startswith('@'):
+            normalized = normalized[1:]
+        
+        # Убираем внутренние пробелы и спецсимволы
+        normalized = ''.join(char for char in normalized if char.isalnum() or char in ['_'])
+        
+        return normalized
     
     async def validate_product_data(
         self,
@@ -330,3 +366,143 @@ class WarehouseService:
         """Проверить, есть ли хотя бы одна категория"""
         categories = await self.get_categories()
         return len(categories) > 0
+    
+    async def mass_add_products(
+        self,
+        base_name: str,
+        category_id: int,
+        product_type: str,
+        duration: str,
+        price: float,
+        content_lines: List[str],
+        admin_id: int,
+        admin_username: Optional[str] = None
+    ) -> List[Product]:
+        """Массовое добавление товаров"""
+        try:
+            products = []
+            
+            for i, content in enumerate(content_lines, 1):
+                if not content.strip():
+                    continue
+                
+                # Генерируем название с номером
+                product_name = f"{base_name} #{i}"
+                
+                # Создаем товар
+                product = Product(
+                    name=product_name,
+                    description=f"Автоматически добавлен через массовое добавление",
+                    price=price,
+                    category_id=category_id,
+                    is_active=True,
+                    is_unlimited=False,
+                    stock_quantity=1,
+                    total_sold=0,
+                    product_type=product_type,
+                    duration=duration,
+                    content=content.strip()
+                )
+                
+                self.session.add(product)
+                products.append(product)
+            
+            # Сохраняем все товары
+            await self.session.flush()
+            
+            # Логируем массовое добавление
+            for product in products:
+                await self._log_warehouse_action(
+                    product_id=product.id,
+                    admin_id=admin_id,
+                    admin_username=admin_username,
+                    action="mass_add_product",
+                    quantity=1,
+                    description=f"Массовое добавление: {product.name}"
+                )
+            
+            await self.session.commit()
+            
+            # Обновляем объекты после коммита
+            for product in products:
+                await self.session.refresh(product)
+            
+            logger.info(f"WAREHOUSE: Mass added {len(products)} products by admin {admin_id}")
+            return products
+            
+        except Exception as e:
+            logger.error(f"Error in mass add products: {e}")
+            await self.session.rollback()
+            return []
+    
+    def parse_content_lines(self, content_text: str, product_type: str) -> List[str]:
+        """Парсинг строк контента в зависимости от типа товара"""
+        lines = [line.strip() for line in content_text.split('\n') if line.strip()]
+        
+        # Проверяем формат в зависимости от типа
+        if product_type == ProductType.ACCOUNT.value:
+            # Для аккаунтов ожидаем login:password
+            valid_lines = []
+            for line in lines:
+                if ':' in line and len(line.split(':')) >= 2:
+                    valid_lines.append(line)
+            return valid_lines
+        else:
+            # Для ключей и промокодов просто возвращаем строки
+            return lines
+    
+    def parse_quick_add_data(self, data_text: str) -> Tuple[bool, dict]:
+        """Парсинг данных для быстрого добавления товара"""
+        try:
+            lines = [line.strip() for line in data_text.split('\n') if line.strip()]
+            
+            if len(lines) < 5:
+                return False, {"error": "Недостаточно данных. Требуется минимум 5 строк."}
+            
+            result = {}
+            
+            # Первая строка - название
+            result['name'] = lines[0]
+            
+            # Ищем остальные поля
+            for line in lines[1:]:
+                if line.lower().startswith('тип:'):
+                    type_value = line.split(':', 1)[1].strip().lower()
+                    if type_value in ['аккаунт', 'account']:
+                        result['product_type'] = ProductType.ACCOUNT.value
+                    elif type_value in ['ключ', 'key']:
+                        result['product_type'] = ProductType.KEY.value
+                    elif type_value in ['промокод', 'promo']:
+                        result['product_type'] = ProductType.PROMO.value
+                    else:
+                        return False, {"error": f"Неизвестный тип товара: {type_value}"}
+                
+                elif line.lower().startswith('длительность:'):
+                    result['duration'] = line.split(':', 1)[1].strip()
+                
+                elif line.lower().startswith('цена:'):
+                    try:
+                        price_str = line.split(':', 1)[1].strip()
+                        result['price'] = float(price_str)
+                    except ValueError:
+                        return False, {"error": f"Неверная цена: {price_str}"}
+                
+                elif line.lower().startswith('контент:'):
+                    result['content'] = line.split(':', 1)[1].strip()
+            
+            # Проверяем наличие всех обязательных полей
+            required_fields = ['name', 'product_type', 'duration', 'price', 'content']
+            missing_fields = [field for field in required_fields if field not in result]
+            
+            if missing_fields:
+                return False, {"error": f"Не хватает полей: {', '.join(missing_fields)}"}
+            
+            # Валидируем контент в зависимости от типа
+            if result['product_type'] == ProductType.ACCOUNT.value:
+                if ':' not in result['content']:
+                    return False, {"error": "Для аккаунтов контент должен быть в формате логин:пароль"}
+            
+            return True, result
+            
+        except Exception as e:
+            return False, {"error": f"Ошибка парсинга: {str(e)}"}

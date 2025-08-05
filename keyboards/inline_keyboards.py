@@ -160,14 +160,11 @@ def user_orders_kb(orders: List[Order], page: int = 0, per_page: int = 5) -> Inl
 
 
 def admin_menu_kb() -> InlineKeyboardMarkup:
-    """Админ меню"""
+    """Упрощенное админ меню"""
     builder = InlineKeyboardBuilder()
     
     builder.row(
         InlineKeyboardButton(text="📦 Заказы", callback_data="admin_orders")
-    )
-    builder.row(
-        InlineKeyboardButton(text="📂 Категории", callback_data="admin_categories")
     )
     builder.row(
         InlineKeyboardButton(text="👥 Пользователи", callback_data="admin_users")
@@ -322,9 +319,13 @@ def warehouse_menu_kb() -> InlineKeyboardMarkup:
     )
     builder.row(
         InlineKeyboardButton(text="➕ Добавить товар", callback_data="warehouse_add_product"),
+        InlineKeyboardButton(text="⚡ Быстрое добавление", callback_data="warehouse_quick_add")
+    )
+    builder.row(
         InlineKeyboardButton(text="🎯 Выдать товар", callback_data="warehouse_give_product")
     )
     builder.row(
+        InlineKeyboardButton(text="📦 Массовое добавление", callback_data="warehouse_mass_add"),
         InlineKeyboardButton(text="📂 Создать категорию", callback_data="warehouse_create_category")
     )
     builder.row(

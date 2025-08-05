@@ -55,3 +55,20 @@ class WarehouseCreateCategoryStates(StatesGroup):
     waiting_for_name = State()
     waiting_for_description = State()
     waiting_for_confirmation = State()
+
+
+class WarehouseMassAddStates(StatesGroup):
+    """Состояния для массового добавления товаров"""
+    waiting_for_category = State()
+    waiting_for_name = State()
+    waiting_for_type = State()
+    waiting_for_duration = State()
+    waiting_for_price = State()
+    waiting_for_content = State()
+    waiting_for_confirmation = State()
+
+
+class WarehouseQuickAddStates(StatesGroup):
+    """Состояния для быстрого добавления товара"""
+    waiting_for_category = State()
+    waiting_for_all_data = State()
