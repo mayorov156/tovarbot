@@ -22,3 +22,11 @@ class AdminStates(StatesGroup):
     
     waiting_for_order_content = State()
     waiting_for_cancel_reason = State()
+    
+    # Состояния для склада
+    waiting_for_user_to_give = State()
+    waiting_for_product_to_give = State()
+    waiting_for_give_quantity = State()
+    waiting_for_stock_quantity = State()
+    waiting_for_edit_product_field = State()
+    waiting_for_new_product_value = State()

@@ -82,3 +82,26 @@ class ProductService:
     async def get_low_stock_alert(self, threshold: int = 5) -> List[Product]:
         """Получить товары с низкими остатками"""
         return await self.product_repo.get_low_stock_products(threshold)
+    
+    # Методы для склада товаров
+    
+    async def get_all_products(self) -> List[Product]:
+        """Получить все товары (включая неактивные)"""
+        return await self.product_repo.get_all()
+    
+    async def get_product_by_id(self, product_id: int) -> Optional[Product]:
+        """Получить товар по ID (для админов)"""
+        return await self.product_repo.get_by_id(product_id)
+    
+    async def decrease_stock(self, product_id: int, quantity: int) -> bool:
+        """Уменьшить остаток товара"""
+        return await self.product_repo.update_stock(product_id, -quantity)
+    
+    async def increase_stock(self, product_id: int, quantity: int) -> bool:
+        """Увеличить остаток товара"""
+        return await self.product_repo.update_stock(product_id, quantity)
+    
+    async def get_stock_quantity(self, product_id: int) -> int:
+        """Получить текущий остаток товара"""
+        product = await self.product_repo.get_by_id(product_id)
+        return product.stock_quantity if product else 0

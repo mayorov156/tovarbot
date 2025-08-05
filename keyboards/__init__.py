@@ -10,7 +10,12 @@ from .inline_keyboards import (
     user_orders_kb,
     admin_menu_kb,
     admin_orders_kb,
-    order_management_kb
+    order_management_kb,
+    warehouse_menu_kb,
+    warehouse_products_kb,
+    warehouse_product_actions_kb,
+    warehouse_categories_kb,
+    confirm_cancel_kb
 )
 
 __all__ = [
@@ -25,5 +30,10 @@ __all__ = [
     "user_orders_kb",
     "admin_menu_kb",
     "admin_orders_kb",
-    "order_management_kb"
+    "order_management_kb",
+    "warehouse_menu_kb",
+    "warehouse_products_kb",
+    "warehouse_product_actions_kb",
+    "warehouse_categories_kb",
+    "confirm_cancel_kb"
 ]

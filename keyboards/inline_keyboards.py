@@ -4,6 +4,7 @@ from typing import List, Optional
 from database.models import Category, Product, Order
 from config import settings
 
+
 def main_menu_kb() -> InlineKeyboardMarkup:
     """Главное меню"""
     builder = InlineKeyboardBuilder()
@@ -175,6 +176,9 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="⚙️ Настройки", callback_data="admin_settings")
     )
     builder.row(
+        InlineKeyboardButton(text="🏪 Склад товаров", callback_data="warehouse_menu")
+    )
+    builder.row(
         InlineKeyboardButton(text="🔙 Главное меню", callback_data="back_to_menu")
     )
     
@@ -301,6 +305,129 @@ def confirm_cancel_kb(action: str, item_id: int) -> InlineKeyboardMarkup:
     builder.row(
         InlineKeyboardButton(text="✅ Да", callback_data=f"confirm_{action}_{item_id}"),
         InlineKeyboardButton(text="❌ Нет", callback_data="cancel_action")
+    )
+    
+    return builder.as_markup()
+
+
+def warehouse_menu_kb() -> InlineKeyboardMarkup:
+    """Меню склада товаров"""
+    builder = InlineKeyboardBuilder()
+    
+    builder.row(
+        InlineKeyboardButton(text="📦 Все товары", callback_data="warehouse_all_products"),
+        InlineKeyboardButton(text="📂 По категориям", callback_data="warehouse_by_category")
+    )
+    builder.row(
+        InlineKeyboardButton(text="➕ Добавить товар", callback_data="warehouse_add_product"),
+        InlineKeyboardButton(text="📝 Редактировать", callback_data="warehouse_edit_products")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🎯 Выдать товар", callback_data="warehouse_give_product"),
+        InlineKeyboardButton(text="📊 История выдач", callback_data="warehouse_history")
+    )
+    builder.row(
+        InlineKeyboardButton(text="📈 Статистика остатков", callback_data="warehouse_stats")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔙 Админ меню", callback_data="admin_menu")
+    )
+    
+    return builder.as_markup()
+
+
+def warehouse_products_kb(products: List[Product], page: int = 0, per_page: int = 5, category_filter: str = None) -> InlineKeyboardMarkup:
+    """Клавиатура товаров на складе с остатками"""
+    builder = InlineKeyboardBuilder()
+    
+    # Пагинация
+    start = page * per_page
+    end = start + per_page
+    page_products = products[start:end]
+    
+    for product in page_products:
+        # Показываем остатки товара
+        if product.is_unlimited:
+            stock_info = "∞"
+        else:
+            stock_info = f"{product.stock_quantity}"
+            
+        status = "🟢" if (product.is_unlimited or product.stock_quantity > 0) else "🔴"
+        
+        builder.row(
+            InlineKeyboardButton(
+                text=f"{status} {product.name} ({stock_info}) - {product.price:.2f}₽",
+                callback_data=f"warehouse_product_{product.id}"
+            )
+        )
+    
+    # Кнопки пагинации
+    nav_buttons = []
+    
+    if page > 0:
+        callback_prefix = f"warehouse_products_{category_filter or 'all'}"
+        nav_buttons.append(
+            InlineKeyboardButton(text="⬅️", callback_data=f"{callback_prefix}_{page-1}")
+        )
+    
+    if end < len(products):
+        callback_prefix = f"warehouse_products_{category_filter or 'all'}"
+        nav_buttons.append(
+            InlineKeyboardButton(text="➡️", callback_data=f"{callback_prefix}_{page+1}")
+        )
+    
+    if nav_buttons:
+        builder.row(*nav_buttons)
+    
+    # Кнопки фильтрации
+    if not category_filter:
+        builder.row(
+            InlineKeyboardButton(text="🔄 Обновить", callback_data="warehouse_all_products")
+        )
+    
+    builder.row(
+        InlineKeyboardButton(text="🔙 Склад", callback_data="warehouse_menu")
+    )
+    
+    return builder.as_markup()
+
+
+def warehouse_product_actions_kb(product: Product) -> InlineKeyboardMarkup:
+    """Клавиатура действий с товаром на складе"""
+    builder = InlineKeyboardBuilder()
+    
+    builder.row(
+        InlineKeyboardButton(text="📝 Редактировать", callback_data=f"warehouse_edit_{product.id}"),
+        InlineKeyboardButton(text="🎯 Выдать", callback_data=f"warehouse_give_{product.id}")
+    )
+    builder.row(
+        InlineKeyboardButton(text="📈 Добавить остаток", callback_data=f"warehouse_add_stock_{product.id}"),
+        InlineKeyboardButton(text="📉 Списать остаток", callback_data=f"warehouse_remove_stock_{product.id}")
+    )
+    builder.row(
+        InlineKeyboardButton(text="❌ Удалить товар", callback_data=f"warehouse_delete_{product.id}")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔙 К товарам", callback_data="warehouse_all_products")
+    )
+    
+    return builder.as_markup()
+
+
+def warehouse_categories_kb(categories: List[Category]) -> InlineKeyboardMarkup:
+    """Клавиатура категорий для склада"""
+    builder = InlineKeyboardBuilder()
+    
+    for category in categories:
+        builder.row(
+            InlineKeyboardButton(
+                text=f"📂 {category.name}",
+                callback_data=f"warehouse_category_{category.id}"
+            )
+        )
+    
+    builder.row(
+        InlineKeyboardButton(text="🔙 Склад", callback_data="warehouse_menu")
     )
     
     return builder.as_markup()

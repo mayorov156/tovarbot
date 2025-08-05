@@ -16,6 +16,16 @@ class UserRepository(BaseRepository[User]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
     
+    async def get_by_id(self, user_id: int) -> Optional[User]:
+        """Получить пользователя по ID (алиас для get_by_telegram_id)"""
+        return await self.get_by_telegram_id(user_id)
+    
+    async def get_by_username(self, username: str) -> Optional[User]:
+        """Получить пользователя по username"""
+        stmt = select(User).where(User.username == username)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+    
     async def get_or_create_user(self, telegram_id: int, **user_data) -> User:
         """Получить или создать пользователя"""
         user = await self.get_by_telegram_id(telegram_id)
