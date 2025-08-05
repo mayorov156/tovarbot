@@ -26,7 +26,10 @@ from .warehouse_keyboards import (
     give_product_confirmation_kb,
     cancel_kb,
     back_to_warehouse_kb,
-    warehouse_action_complete_kb
+    warehouse_action_complete_kb,
+    warehouse_all_products_kb,
+    create_category_confirmation_kb,
+    no_categories_warning_kb
 )
 
 __all__ = [
@@ -55,5 +58,8 @@ __all__ = [
     "give_product_confirmation_kb",
     "cancel_kb",
     "back_to_warehouse_kb",
-    "warehouse_action_complete_kb"
+    "warehouse_action_complete_kb",
+    "warehouse_all_products_kb",
+    "create_category_confirmation_kb",
+    "no_categories_warning_kb"
 ]

@@ -261,3 +261,72 @@ class WarehouseService:
         
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
+    
+    async def create_category(
+        self,
+        name: str,
+        description: Optional[str],
+        admin_id: int,
+        admin_username: Optional[str] = None
+    ) -> Optional[Category]:
+        """Создать новую категорию"""
+        try:
+            # Проверяем, существует ли категория с таким именем
+            existing = await self.category_repo.get_by_name(name)
+            if existing:
+                return None
+            
+            # Создаем категорию
+            category = Category(
+                name=name,
+                description=description or "",
+                is_active=True,
+                sort_order=0
+            )
+            
+            self.session.add(category)
+            await self.session.flush()
+            
+            # Логируем создание
+            await self._log_warehouse_action(
+                product_id=0,  # Для категорий используем 0
+                admin_id=admin_id,
+                admin_username=admin_username,
+                action="create_category",
+                quantity=1,
+                description=f"Создана категория: {name}"
+            )
+            
+            await self.session.commit()
+            await self.session.refresh(category)
+            
+            logger.info(f"WAREHOUSE: Created category '{name}' (ID: {category.id}) by admin {admin_id}")
+            return category
+            
+        except Exception as e:
+            logger.error(f"Error creating category: {e}")
+            await self.session.rollback()
+            return None
+    
+    async def validate_category_data(
+        self,
+        name: str,
+        description: Optional[str] = None
+    ) -> Tuple[bool, Optional[str]]:
+        """Валидировать данные категории"""
+        
+        # Проверяем имя
+        if not name or len(name.strip()) < 2:
+            return False, "Название категории должно содержать минимум 2 символа"
+        
+        # Проверяем уникальность имени
+        existing = await self.category_repo.get_by_name(name.strip())
+        if existing:
+            return False, "Категория с таким названием уже существует"
+        
+        return True, None
+    
+    async def has_categories(self) -> bool:
+        """Проверить, есть ли хотя бы одна категория"""
+        categories = await self.get_categories()
+        return len(categories) > 0

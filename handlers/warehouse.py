@@ -8,12 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from database.models import ProductType
-from utils.states import WarehouseAddProductStates, WarehouseGiveProductStates
+from utils.states import WarehouseAddProductStates, WarehouseGiveProductStates, WarehouseCreateCategoryStates
 from utils.warehouse_templates import WarehouseMessages
 from keyboards.warehouse_keyboards import (
     product_type_kb, warehouse_categories_select_kb, warehouse_products_select_kb,
     add_product_confirmation_kb, give_product_confirmation_kb, cancel_kb,
-    back_to_warehouse_kb, warehouse_action_complete_kb
+    back_to_warehouse_kb, warehouse_action_complete_kb, warehouse_all_products_kb,
+    create_category_confirmation_kb, no_categories_warning_kb
 )
 from services.warehouse_service import WarehouseService
 
@@ -27,6 +28,23 @@ def is_admin(user_id: int) -> bool:
     return user_id in settings.ADMIN_IDS
 
 
+async def check_categories_exist(callback: CallbackQuery, session: AsyncSession) -> bool:
+    """Проверить существование категорий и показать предупреждение если их нет"""
+    from services.warehouse_service import WarehouseService
+    
+    warehouse_service = WarehouseService(session)
+    has_categories = await warehouse_service.has_categories()
+    
+    if not has_categories:
+        await callback.message.edit_text(
+            WarehouseMessages.NO_CATEGORIES_WARNING,
+            reply_markup=no_categories_warning_kb()
+        )
+        return False
+    
+    return True
+
+
 # ========== ДОБАВЛЕНИЕ ТОВАРА ==========
 
 @warehouse_router.callback_query(F.data == "warehouse_add_product")
@@ -36,15 +54,12 @@ async def start_add_product(callback: CallbackQuery, state: FSMContext, session:
         await callback.answer("❌ У вас нет прав доступа", show_alert=True)
         return
     
+    # Проверяем существование категорий
+    if not await check_categories_exist(callback, session):
+        return
+    
     warehouse_service = WarehouseService(session)
     categories = await warehouse_service.get_categories()
-    
-    if not categories:
-        await callback.message.edit_text(
-            "❌ Нет доступных категорий. Сначала создайте категории.",
-            reply_markup=back_to_warehouse_kb()
-        )
-        return
     
     await state.set_state(WarehouseAddProductStates.waiting_for_category)
     
@@ -292,6 +307,10 @@ async def start_give_product(callback: CallbackQuery, state: FSMContext, session
         await callback.answer("❌ У вас нет прав доступа", show_alert=True)
         return
     
+    # Проверяем существование категорий
+    if not await check_categories_exist(callback, session):
+        return
+    
     warehouse_service = WarehouseService(session)
     products = await warehouse_service.get_available_products()
     
@@ -457,6 +476,135 @@ async def confirm_give_product(callback: CallbackQuery, state: FSMContext, sessi
         logger.error(f"Failed to send notification to user {data['recipient_id']}: {e}")
     
     await state.clear()
+    await callback.answer()
+
+
+# ========== СОЗДАНИЕ КАТЕГОРИИ ==========
+
+@warehouse_router.callback_query(F.data == "warehouse_create_category")
+async def start_create_category(callback: CallbackQuery, state: FSMContext):
+    """Начать процесс создания категории"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    await state.set_state(WarehouseCreateCategoryStates.waiting_for_name)
+    
+    await callback.message.edit_text(
+        WarehouseMessages.CREATE_CATEGORY_START,
+        reply_markup=cancel_kb()
+    )
+    await callback.answer()
+
+
+@warehouse_router.message(WarehouseCreateCategoryStates.waiting_for_name)
+async def enter_category_name(message: Message, state: FSMContext, session: AsyncSession):
+    """Ввод названия категории"""
+    name = message.text.strip()
+    warehouse_service = WarehouseService(session)
+    
+    # Валидация имени категории
+    is_valid, error_message = await warehouse_service.validate_category_data(name)
+    if not is_valid:
+        await message.answer(
+            f"❌ {error_message}\n\nПопробуйте еще раз:",
+            reply_markup=cancel_kb()
+        )
+        return
+    
+    await state.update_data(name=name)
+    await state.set_state(WarehouseCreateCategoryStates.waiting_for_description)
+    
+    await message.answer(
+        WarehouseMessages.CREATE_CATEGORY_DESCRIPTION,
+        reply_markup=cancel_kb()
+    )
+
+
+@warehouse_router.message(WarehouseCreateCategoryStates.waiting_for_description)
+async def enter_category_description(message: Message, state: FSMContext):
+    """Ввод описания категории"""
+    description = message.text.strip()
+    
+    # Если отправили "-", то пропускаем описание
+    if description == "-":
+        description = None
+    
+    data = await state.get_data()
+    await state.update_data(description=description)
+    await state.set_state(WarehouseCreateCategoryStates.waiting_for_confirmation)
+    
+    confirmation_text = WarehouseMessages.CREATE_CATEGORY_CONFIRMATION.format(
+        name=data["name"],
+        description=description or "Не указано"
+    )
+    
+    await message.answer(
+        confirmation_text,
+        reply_markup=create_category_confirmation_kb()
+    )
+
+
+@warehouse_router.callback_query(F.data == "warehouse_confirm_create_category", WarehouseCreateCategoryStates.waiting_for_confirmation)
+async def confirm_create_category(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Подтвердить создание категории"""
+    data = await state.get_data()
+    warehouse_service = WarehouseService(session)
+    
+    # Создаем категорию
+    category = await warehouse_service.create_category(
+        name=data["name"],
+        description=data.get("description"),
+        admin_id=callback.from_user.id,
+        admin_username=callback.from_user.username
+    )
+    
+    if category:
+        success_text = WarehouseMessages.CREATE_CATEGORY_SUCCESS.format(
+            name=category.name,
+            id=category.id,
+            description=category.description or "Не указано"
+        )
+        
+        await callback.message.edit_text(
+            success_text,
+            reply_markup=warehouse_action_complete_kb()
+        )
+        
+        logger.info(f"WAREHOUSE: Category '{category.name}' created by admin {callback.from_user.id}")
+    else:
+        await callback.message.edit_text(
+            "❌ Ошибка при создании категории. Возможно, категория с таким именем уже существует.",
+            reply_markup=back_to_warehouse_kb()
+        )
+    
+    await state.clear()
+    await callback.answer()
+
+
+# ========== ОБНОВЛЕННЫЕ ОБРАБОТЧИКИ ==========
+
+@warehouse_router.callback_query(F.data == "warehouse_all_products")  
+async def warehouse_all_products_new(callback: CallbackQuery, session: AsyncSession):
+    """Показать все товары с управлением"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    warehouse_service = WarehouseService(session)
+    products = await warehouse_service.get_available_products()
+    
+    if not products:
+        await callback.message.edit_text(
+            "📦 <b>Все товары</b>\n\n❌ Товары не найдены.",
+            reply_markup=back_to_warehouse_kb()
+        )
+        return
+    
+    await callback.message.edit_text(
+        f"📦 <b>Все товары</b>\n\nВсего товаров: {len(products)}",
+        reply_markup=warehouse_all_products_kb(products)
+    )
     await callback.answer()
 
 

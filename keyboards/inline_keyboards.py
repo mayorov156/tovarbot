@@ -314,20 +314,18 @@ def confirm_cancel_kb(action: str, item_id: int) -> InlineKeyboardMarkup:
 
 
 def warehouse_menu_kb() -> InlineKeyboardMarkup:
-    """Меню склада товаров"""
+    """Главное меню склада товаров"""
     builder = InlineKeyboardBuilder()
     
     builder.row(
-        InlineKeyboardButton(text="📦 Все товары", callback_data="warehouse_all_products"),
-        InlineKeyboardButton(text="📂 По категориям", callback_data="warehouse_by_category")
+        InlineKeyboardButton(text="📦 Все товары", callback_data="warehouse_all_products")
     )
     builder.row(
         InlineKeyboardButton(text="➕ Добавить товар", callback_data="warehouse_add_product"),
-        InlineKeyboardButton(text="📝 Редактировать", callback_data="warehouse_edit_products")
+        InlineKeyboardButton(text="🎯 Выдать товар", callback_data="warehouse_give_product")
     )
     builder.row(
-        InlineKeyboardButton(text="🎯 Выдать товар", callback_data="warehouse_give_product"),
-        InlineKeyboardButton(text="📊 История выдач", callback_data="warehouse_history")
+        InlineKeyboardButton(text="📂 Создать категорию", callback_data="warehouse_create_category")
     )
     builder.row(
         InlineKeyboardButton(text="📈 Статистика остатков", callback_data="warehouse_stats")

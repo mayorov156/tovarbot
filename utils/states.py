@@ -48,3 +48,10 @@ class WarehouseGiveProductStates(StatesGroup):
     waiting_for_product = State()
     waiting_for_user = State()
     waiting_for_confirmation = State()
+
+
+class WarehouseCreateCategoryStates(StatesGroup):
+    """Состояния для создания категории"""
+    waiting_for_name = State()
+    waiting_for_description = State()
+    waiting_for_confirmation = State()

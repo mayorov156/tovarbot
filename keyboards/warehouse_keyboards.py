@@ -140,3 +140,82 @@ def warehouse_action_complete_kb() -> InlineKeyboardMarkup:
     )
     
     return builder.as_markup()
+
+
+def warehouse_all_products_kb(products: List[Product], page: int = 0, per_page: int = 5) -> InlineKeyboardMarkup:
+    """Клавиатура всех товаров с управлением"""
+    builder = InlineKeyboardBuilder()
+    
+    # Пагинация
+    start = page * per_page
+    end = start + per_page
+    page_products = products[start:end]
+    
+    for product in page_products:
+        # Показываем остатки товара
+        if product.is_unlimited:
+            stock_info = "∞"
+        else:
+            stock_info = f"{product.stock_quantity}"
+            
+        status = "🟢" if (product.is_unlimited or product.stock_quantity > 0) else "🔴"
+        
+        # Название товара
+        builder.row(
+            InlineKeyboardButton(
+                text=f"{status} {product.name} ({stock_info}) - {product.price:.2f}₽",
+                callback_data=f"warehouse_product_info_{product.id}"
+            )
+        )
+        
+        # Кнопки управления товаром
+        builder.row(
+            InlineKeyboardButton(text="📝 Редактировать", callback_data=f"warehouse_edit_{product.id}"),
+            InlineKeyboardButton(text="🎯 Выдать", callback_data=f"warehouse_give_single_{product.id}"),
+            InlineKeyboardButton(text="❌ Удалить", callback_data=f"warehouse_delete_{product.id}")
+        )
+    
+    # Кнопки пагинации
+    nav_buttons = []
+    
+    if page > 0:
+        nav_buttons.append(
+            InlineKeyboardButton(text="⬅️", callback_data=f"warehouse_all_products_page_{page-1}")
+        )
+    
+    if end < len(products):
+        nav_buttons.append(
+            InlineKeyboardButton(text="➡️", callback_data=f"warehouse_all_products_page_{page+1}")
+        )
+    
+    if nav_buttons:
+        builder.row(*nav_buttons)
+    
+    # Кнопки действий
+    builder.row(
+        InlineKeyboardButton(text="🔄 Обновить", callback_data="warehouse_all_products")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔙 К складу", callback_data="warehouse_menu")
+    )
+    
+    return builder.as_markup()
+
+
+def create_category_confirmation_kb() -> InlineKeyboardMarkup:
+    """Клавиатура подтверждения создания категории"""
+    return confirmation_kb("warehouse_confirm_create_category")
+
+
+def no_categories_warning_kb() -> InlineKeyboardMarkup:
+    """Клавиатура предупреждения об отсутствии категорий"""
+    builder = InlineKeyboardBuilder()
+    
+    builder.row(
+        InlineKeyboardButton(text="📂 Создать категорию", callback_data="warehouse_create_category")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔙 К складу", callback_data="warehouse_menu")
+    )
+    
+    return builder.as_markup()
