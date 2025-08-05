@@ -193,3 +193,30 @@ class WarehouseLog(Base):
     
     # Отношения
     product: Mapped["Product"] = relationship("Product", back_populates="warehouse_logs")
+
+
+class SystemSetting(Base):
+    __tablename__ = "system_settings"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    
+    # Ключ настройки
+    key: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    
+    # Значение настройки
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    
+    # Тип значения (string, int, float, bool)
+    value_type: Mapped[str] = mapped_column(String(20), default="string")
+    
+    # Описание настройки
+    description: Mapped[str] = mapped_column(Text, nullable=True)
+    
+    # Категория настройки
+    category: Mapped[str] = mapped_column(String(50), default="general")
+    
+    # Является ли настройка общедоступной для изменения админами
+    is_editable: Mapped[bool] = mapped_column(Boolean, default=True)
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

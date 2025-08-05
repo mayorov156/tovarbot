@@ -69,12 +69,15 @@ async def main():
         print(f"Ошибка: {event.exception}")
         return True
     
-    # Уведомляем админов о запуске
+    # Уведомляем админов о запуске с админ-меню
+    from keyboards.inline_keyboards import admin_menu_kb
     for admin_id in settings.ADMIN_IDS:
         try:
             await bot.send_message(
                 admin_id,
-                "🤖 Бот запущен и готов к работе!"
+                "🤖 <b>Бот запущен и готов к работе!</b>\n\n"
+                "⚙️ Используйте админ-панель для управления:",
+                reply_markup=admin_menu_kb()
             )
         except Exception as e:
             logger.warning(f"Failed to notify admin {admin_id}: {e}")

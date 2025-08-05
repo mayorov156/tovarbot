@@ -3,7 +3,7 @@
 import logging
 from typing import Optional, List, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, and_
 from sqlalchemy.orm import selectinload
 
 from database.models import Product, Category, User, WarehouseLog, ProductType
@@ -145,6 +145,10 @@ class WarehouseService:
     async def get_available_products(self) -> List[Product]:
         """Получить товары доступные для выдачи"""
         return await self.product_repo.get_available_products()
+    
+    async def get_products_by_category(self, category_id: int) -> List[Product]:
+        """Получить все товары по категории"""
+        return await self.product_repo.get_active_products(category_id)
     
     async def get_categories(self) -> List[Category]:
         """Получить все активные категории"""
@@ -398,17 +402,71 @@ class WarehouseService:
         content_lines: List[str],
         admin_id: int,
         admin_username: Optional[str] = None
-    ) -> List[Product]:
-        """Массовое добавление товаров"""
+    ) -> Tuple[List[Product], dict]:
+        """
+        Массовое добавление товаров с валидацией и отчетом
+        
+        Returns:
+            (products, report) где report содержит статистику ошибок
+        """
         try:
             products = []
+            report = {
+                'total_lines': len(content_lines),
+                'successful': 0,
+                'errors': [],
+                'duplicates': 0,
+                'empty_lines': 0,
+                'invalid_format': 0
+            }
+            
+            # Проверяем дубли в самом наборе данных
+            unique_contents = set()
+            processed_contents = []
             
             for i, content in enumerate(content_lines, 1):
-                if not content.strip():
+                content = content.strip()
+                
+                if not content:
+                    report['empty_lines'] += 1
+                    report['errors'].append(f"Строка {i}: пустая строка")
                     continue
                 
+                # Проверяем формат содержимого
+                if product_type == ProductType.ACCOUNT.value:
+                    if ":" not in content or len(content.split(":")) < 2:
+                        report['invalid_format'] += 1
+                        report['errors'].append(f"Строка {i}: неверный формат (ожидается логин:пароль)")
+                        continue
+                    
+                    # Проверяем, что логин и пароль не пустые
+                    parts = content.split(":", 1)
+                    if not parts[0].strip() or not parts[1].strip():
+                        report['invalid_format'] += 1
+                        report['errors'].append(f"Строка {i}: логин или пароль пустые")
+                        continue
+                
+                # Проверяем дубли в текущем наборе
+                if content.lower() in unique_contents:
+                    report['duplicates'] += 1
+                    report['errors'].append(f"Строка {i}: дубликат контента")
+                    continue
+                
+                unique_contents.add(content.lower())
+                
+                # Проверяем дубли в базе данных
+                existing_product = await self._check_content_duplicate(content, product_type)
+                if existing_product:
+                    report['duplicates'] += 1
+                    report['errors'].append(f"Строка {i}: товар с таким содержимым уже существует (ID: {existing_product.id})")
+                    continue
+                
+                processed_contents.append((i, content))
+            
+            # Создаем товары только для валидных строк
+            for line_num, content in processed_contents:
                 # Генерируем название с номером
-                product_name = f"{base_name} #{i}"
+                product_name = f"{base_name} #{line_num}"
                 
                 # Создаем товар
                 product = Product(
@@ -422,39 +480,52 @@ class WarehouseService:
                     total_sold=0,
                     product_type=product_type,
                     duration=duration,
-                    content=content.strip()
+                    digital_content=content
                 )
                 
                 self.session.add(product)
                 products.append(product)
             
             # Сохраняем все товары
-            await self.session.flush()
+            if products:
+                await self.session.flush()
+                
+                # Логируем массовое добавление
+                for product in products:
+                    await self._log_warehouse_action(
+                        product_id=product.id,
+                        admin_id=admin_id,
+                        admin_username=admin_username,
+                        action="mass_add_product",
+                        quantity=1,
+                        description=f"Массовое добавление: {product.name}"
+                    )
+                
+                await self.session.commit()
+                
+                # Обновляем объекты после коммита
+                for product in products:
+                    await self.session.refresh(product)
             
-            # Логируем массовое добавление
-            for product in products:
-                await self._log_warehouse_action(
-                    product_id=product.id,
-                    admin_id=admin_id,
-                    admin_username=admin_username,
-                    action="mass_add_product",
-                    quantity=1,
-                    description=f"Массовое добавление: {product.name}"
-                )
+            report['successful'] = len(products)
             
-            await self.session.commit()
+            logger.info(f"WAREHOUSE: Mass added {len(products)} products by admin {admin_id}. "
+                       f"Errors: {len(report['errors'])}, Duplicates: {report['duplicates']}")
             
-            # Обновляем объекты после коммита
-            for product in products:
-                await self.session.refresh(product)
-            
-            logger.info(f"WAREHOUSE: Mass added {len(products)} products by admin {admin_id}")
-            return products
+            return products, report
             
         except Exception as e:
             logger.error(f"Error in mass add products: {e}")
             await self.session.rollback()
-            return []
+            report = {
+                'total_lines': len(content_lines),
+                'successful': 0,
+                'errors': [f"Критическая ошибка: {str(e)}"],
+                'duplicates': 0,
+                'empty_lines': 0,
+                'invalid_format': 0
+            }
+            return [], report
     
     def parse_content_lines(self, content_text: str, product_type: str) -> List[str]:
         """Парсинг строк контента в зависимости от типа товара"""
@@ -527,3 +598,145 @@ class WarehouseService:
             
         except Exception as e:
             return False, {"error": f"Ошибка парсинга: {str(e)}"}
+    
+    async def _check_content_duplicate(self, content: str, product_type: str) -> Optional[Product]:
+        """Проверить, существует ли товар с таким же содержимым"""
+        try:
+            stmt = (
+                select(Product)
+                .where(
+                    and_(
+                        Product.digital_content == content,
+                        Product.product_type == product_type,
+                        Product.is_active == True
+                    )
+                )
+            )
+            
+            result = await self.session.execute(stmt)
+            return result.scalar_one_or_none()
+            
+        except Exception as e:
+            logger.error(f"Error checking content duplicate: {e}")
+            return None
+    
+    async def update_product(
+        self,
+        product_id: int,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        price: Optional[float] = None,
+        product_type: Optional[str] = None,
+        duration: Optional[str] = None,
+        digital_content: Optional[str] = None,
+        admin_id: int = None,
+        admin_username: Optional[str] = None
+    ) -> Optional[Product]:
+        """Обновить товар"""
+        try:
+            product = await self.get_product_with_category(product_id)
+            if not product:
+                return None
+            
+            # Сохраняем старые значения для логирования
+            old_values = {
+                'name': product.name,
+                'price': product.price,
+                'product_type': product.product_type,
+                'duration': product.duration,
+                'digital_content': product.digital_content
+            }
+            
+            # Обновляем только переданные поля
+            if name is not None:
+                product.name = name
+            if description is not None:
+                product.description = description  
+            if price is not None:
+                product.price = price
+            if product_type is not None:
+                product.product_type = product_type
+            if duration is not None:
+                product.duration = duration
+            if digital_content is not None:
+                product.digital_content = digital_content
+            
+            # Логируем изменения
+            changes = []
+            for field, old_value in old_values.items():
+                new_value = getattr(product, field)
+                if old_value != new_value:
+                    changes.append(f"{field}: '{old_value}' -> '{new_value}'")
+            
+            if changes:
+                await self._log_warehouse_action(
+                    product_id=product_id,
+                    admin_id=admin_id,
+                    admin_username=admin_username,
+                    action="edit_product",
+                    quantity=1,
+                    description=f"Изменения: {'; '.join(changes)}"
+                )
+            
+            await self.session.commit()
+            await self.session.refresh(product)
+            
+            logger.info(f"WAREHOUSE: Product {product_id} updated by admin {admin_id}. Changes: {changes}")
+            return product
+            
+        except Exception as e:
+            logger.error(f"Error updating product {product_id}: {e}")
+            await self.session.rollback()
+            return None
+    
+    async def get_category_stats(self) -> List[dict]:
+        """Получить статистику товаров по категориям"""
+        from sqlalchemy import func
+        try:
+            # Получаем все категории с подсчетом товаров
+            stmt = select(
+                Category.id,
+                Category.name,
+                select(func.count(Product.id)).where(
+                    and_(
+                        Product.category_id == Category.id,
+                        Product.is_active == True
+                    )
+                ).label('total_products'),
+                select(func.sum(Product.stock_quantity)).where(
+                    and_(
+                        Product.category_id == Category.id,
+                        Product.is_active == True,
+                        Product.is_unlimited == False
+                    )
+                ).label('total_stock')
+            ).order_by(Category.name)
+            
+            result = await self.session.execute(stmt)
+            category_stats = []
+            
+            for row in result:
+                # Получаем количество безлимитных товаров
+                unlimited_stmt = select(func.count(Product.id)).where(
+                    and_(
+                        Product.category_id == row.id,
+                        Product.is_active == True,
+                        Product.is_unlimited == True
+                    )
+                )
+                unlimited_result = await self.session.execute(unlimited_stmt)
+                unlimited_count = unlimited_result.scalar() or 0
+                
+                category_stats.append({
+                    'id': row.id,
+                    'name': row.name,
+                    'total_products': row.total_products or 0,
+                    'total_stock': row.total_stock or 0,
+                    'unlimited_products': unlimited_count
+                })
+            
+            return category_stats
+            
+        except Exception as e:
+            logger.error(f"Error getting category stats: {e}")
+            return []

@@ -311,25 +311,21 @@ def confirm_cancel_kb(action: str, item_id: int) -> InlineKeyboardMarkup:
 
 
 def warehouse_menu_kb() -> InlineKeyboardMarkup:
-    """Главное меню склада товаров"""
+    """Главное меню склада товаров - обновленная компактная версия"""
     builder = InlineKeyboardBuilder()
     
     builder.row(
         InlineKeyboardButton(text="📦 Все товары", callback_data="warehouse_all_products")
     )
     builder.row(
-        InlineKeyboardButton(text="➕ Добавить товар", callback_data="warehouse_add_product"),
-        InlineKeyboardButton(text="⚡ Быстрое добавление", callback_data="warehouse_quick_add")
+        InlineKeyboardButton(text="📥 Добавить/Импортировать", callback_data="warehouse_add_menu")
     )
     builder.row(
-        InlineKeyboardButton(text="🎯 Выдать товар", callback_data="warehouse_give_product")
+        InlineKeyboardButton(text="⚡ Быстрый мастер", callback_data="warehouse_quick_master")
     )
     builder.row(
-        InlineKeyboardButton(text="📦 Массовое добавление", callback_data="warehouse_mass_add"),
-        InlineKeyboardButton(text="📂 Создать категорию", callback_data="warehouse_create_category")
-    )
-    builder.row(
-        InlineKeyboardButton(text="📈 Статистика остатков", callback_data="warehouse_stats")
+        InlineKeyboardButton(text="📂 Создать категорию", callback_data="warehouse_create_category"),
+        InlineKeyboardButton(text="📈 Статистика", callback_data="warehouse_stats")
     )
     builder.row(
         InlineKeyboardButton(text="🔙 Админ меню", callback_data="admin_menu")
@@ -430,6 +426,43 @@ def warehouse_categories_kb(categories: List[Category]) -> InlineKeyboardMarkup:
     
     builder.row(
         InlineKeyboardButton(text="🔙 Склад", callback_data="warehouse_menu")
+    )
+    
+    return builder.as_markup()
+
+
+def admin_users_menu_kb() -> InlineKeyboardMarkup:
+    """Меню управления пользователями"""
+    builder = InlineKeyboardBuilder()
+    
+    builder.row(
+        InlineKeyboardButton(text="🏆 Топ покупателей", callback_data="admin_users_top_buyers")
+    )
+    builder.row(
+        InlineKeyboardButton(text="📈 Активные пользователи", callback_data="admin_users_active")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🆕 Новые пользователи", callback_data="admin_users_recent")
+    )
+    builder.row(
+        InlineKeyboardButton(text="💰 С балансом", callback_data="admin_users_balance")
+    )
+    builder.row(
+        InlineKeyboardButton(text="📊 Общая статистика", callback_data="admin_users_stats")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔙 Админ меню", callback_data="admin_menu")
+    )
+    
+    return builder.as_markup()
+
+
+def admin_users_back_kb() -> InlineKeyboardMarkup:
+    """Кнопка возврата к меню пользователей"""
+    builder = InlineKeyboardBuilder()
+    
+    builder.row(
+        InlineKeyboardButton(text="🔙 К пользователям", callback_data="admin_users")
     )
     
     return builder.as_markup()

@@ -73,3 +73,27 @@ class WarehouseQuickAddStates(StatesGroup):
     """Состояния для быстрого добавления товара"""
     waiting_for_category = State()
     waiting_for_all_data = State()
+
+
+class WarehouseEditProductStates(StatesGroup):
+    """Состояния для редактирования товара"""
+    waiting_for_field_selection = State()
+    waiting_for_name = State()
+    waiting_for_type = State()
+    waiting_for_duration = State()
+    waiting_for_price = State()
+    waiting_for_content = State()
+    waiting_for_confirmation = State()
+
+
+class WarehouseQuickGiveStates(StatesGroup):
+    """Состояния для быстрой выдачи товара"""
+    waiting_for_search = State()
+    waiting_for_user = State()
+    waiting_for_confirmation = State()
+
+
+class AdminSettingsStates(StatesGroup):
+    """Состояния для редактирования настроек системы"""
+    waiting_for_value = State()
+    waiting_for_confirmation = State()

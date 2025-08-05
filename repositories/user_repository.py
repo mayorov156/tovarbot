@@ -93,3 +93,41 @@ class UserRepository(BaseRepository[User]):
             "active_users": active_users or 0,
             "total_balance": total_balance
         }
+    
+    async def get_recent_users(self, limit: int = 10) -> List[User]:
+        """Получить недавно зарегистрированных пользователей"""
+        from datetime import datetime, timedelta
+        
+        # Пользователи за последние 7 дней
+        recent_date = datetime.now() - timedelta(days=7)
+        
+        stmt = (
+            select(User)
+            .where(User.created_at >= recent_date)
+            .order_by(User.created_at.desc())
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+    
+    async def get_active_users(self, limit: int = 10) -> List[User]:
+        """Получить наиболее активных пользователей (по количеству заказов)"""
+        stmt = (
+            select(User)
+            .where(User.total_orders > 0)
+            .order_by(User.total_orders.desc())
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+    
+    async def get_users_with_balance(self, limit: int = 10) -> List[User]:
+        """Получить пользователей с наибольшим балансом"""
+        stmt = (
+            select(User)
+            .where(User.balance > 0)
+            .order_by(User.balance.desc())
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())

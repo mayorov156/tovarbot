@@ -37,11 +37,20 @@ async def start_handler(message: Message, session: AsyncSession):
         if success:
             await message.answer("✅ Вы успешно зарегистрированы по реферальной ссылке!")
     
-    welcome_text = f"👋 Добро пожаловать, {user.first_name or 'друг'}!\n\n"
-    welcome_text += "🛍 Это бот для покупки цифровых товаров.\n"
-    welcome_text += "Выберите действие из меню ниже:"
-    
-    await message.answer(welcome_text, reply_markup=main_menu_kb())
+    # Проверяем, является ли пользователь админом
+    if message.from_user.id in settings.ADMIN_IDS:
+        from keyboards.inline_keyboards import admin_menu_kb
+        welcome_text = f"👋 Добро пожаловать, {user.first_name or 'админ'}!\n\n"
+        welcome_text += "⚙️ <b>Админ-панель</b>\n"
+        welcome_text += "Используйте меню ниже для управления ботом:"
+        
+        await message.answer(welcome_text, reply_markup=admin_menu_kb())
+    else:
+        welcome_text = f"👋 Добро пожаловать, {user.first_name or 'друг'}!\n\n"
+        welcome_text += "🛍 Это бот для покупки цифровых товаров.\n"
+        welcome_text += "Выберите действие из меню ниже:"
+        
+        await message.answer(welcome_text, reply_markup=main_menu_kb())
 
 
 @user_router.message(Command("menu"))

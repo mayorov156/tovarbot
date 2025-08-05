@@ -280,28 +280,217 @@ async def admin_settings_callback(callback: CallbackQuery):
 
 
 @admin_router.callback_query(F.data == "admin_users")
-async def admin_users_callback(callback: CallbackQuery, session: AsyncSession ):
-    """Управление пользователями (заглушка)"""
+async def admin_users_callback(callback: CallbackQuery, session: AsyncSession):
+    """Главное меню управления пользователями"""
     if not is_admin(callback.from_user.id):
         await callback.answer("❌ У вас нет прав доступа", show_alert=True)
         return
     
-    user_service = UserService(session)
     from repositories import UserRepository
-    
     user_repo = UserRepository(session)
-    top_buyers = await user_repo.get_top_buyers(5)
     
-    text = "👥 <b>Управление пользователями</b>\n\n"
-    text += "🏆 <b>Топ покупателей:</b>\n"
+    # Получаем общую статистику
+    stats = await user_repo.get_stats()
     
-    for i, user in enumerate(top_buyers, 1):
-        name = user.first_name or "Пользователь"
-        text += f"{i}. {name} - {user.total_spent:.2f}₽\n"
+    text = (
+        "👥 <b>Управление пользователями</b>\n\n"
+        "📊 <b>Общие показатели:</b>\n"
+        f"• Всего пользователей: {stats['total_users']}\n"
+        f"• Активных покупателей: {stats['active_users']}\n"
+        f"• Общий баланс: {stats['total_balance']:.2f}₽\n\n"
+        "Выберите раздел для просмотра:"
+    )
+    
+    from keyboards.inline_keyboards import admin_users_menu_kb
     
     await callback.message.edit_text(
         text,
-        reply_markup=back_button("admin_menu")
+        reply_markup=admin_users_menu_kb()
+    )
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "admin_users_top_buyers")
+async def admin_users_top_buyers_callback(callback: CallbackQuery, session: AsyncSession):
+    """Показать топ покупателей"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    from repositories import UserRepository
+    user_repo = UserRepository(session)
+    top_buyers = await user_repo.get_top_buyers(10)
+    
+    text = "🏆 <b>Топ покупателей</b>\n\n"
+    
+    if top_buyers:
+        for i, user in enumerate(top_buyers, 1):
+            name = user.first_name or "Пользователь"
+            username = f"@{user.username}" if user.username else ""
+            text += f"{i}. {name} {username}\n"
+            text += f"   💰 Потрачено: {user.total_spent:.2f}₽\n"
+            text += f"   📦 Заказов: {user.total_orders}\n\n"
+    else:
+        text += "📭 Пока нет покупателей"
+    
+    from keyboards.inline_keyboards import admin_users_back_kb
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=admin_users_back_kb()
+    )
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "admin_users_active")
+async def admin_users_active_callback(callback: CallbackQuery, session: AsyncSession):
+    """Показать активных пользователей"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    from repositories import UserRepository
+    user_repo = UserRepository(session)
+    active_users = await user_repo.get_active_users(10)
+    
+    text = "📈 <b>Самые активные пользователи</b>\n\n"
+    
+    if active_users:
+        for i, user in enumerate(active_users, 1):
+            name = user.first_name or "Пользователь"
+            username = f"@{user.username}" if user.username else ""
+            text += f"{i}. {name} {username}\n"
+            text += f"   📦 Заказов: {user.total_orders}\n"
+            text += f"   💰 Потрачено: {user.total_spent:.2f}₽\n\n"
+    else:
+        text += "📭 Пока нет активных пользователей"
+    
+    from keyboards.inline_keyboards import admin_users_back_kb
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=admin_users_back_kb()
+    )
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "admin_users_recent")
+async def admin_users_recent_callback(callback: CallbackQuery, session: AsyncSession):
+    """Показать новых пользователей"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    from repositories import UserRepository
+    user_repo = UserRepository(session)
+    recent_users = await user_repo.get_recent_users(10)
+    
+    text = "🆕 <b>Новые пользователи (за 7 дней)</b>\n\n"
+    
+    if recent_users:
+        for i, user in enumerate(recent_users, 1):
+            name = user.first_name or "Пользователь"
+            username = f"@{user.username}" if user.username else ""
+            reg_date = user.created_at.strftime("%d.%m.%Y %H:%M") if hasattr(user, 'created_at') and user.created_at else "Дата неизвестна"
+            text += f"{i}. {name} {username}\n"
+            text += f"   📅 Регистрация: {reg_date}\n"
+            text += f"   📦 Заказов: {user.total_orders}\n\n"
+    else:
+        text += "📭 Нет новых пользователей за последние 7 дней"
+    
+    from keyboards.inline_keyboards import admin_users_back_kb
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=admin_users_back_kb()
+    )
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "admin_users_balance")
+async def admin_users_balance_callback(callback: CallbackQuery, session: AsyncSession):
+    """Показать пользователей с балансом"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    from repositories import UserRepository
+    user_repo = UserRepository(session)
+    users_with_balance = await user_repo.get_users_with_balance(10)
+    
+    text = "💰 <b>Пользователи с балансом</b>\n\n"
+    
+    if users_with_balance:
+        total_balance = sum(user.balance for user in users_with_balance)
+        text += f"💳 <b>Общий баланс топ-{len(users_with_balance)}: {total_balance:.2f}₽</b>\n\n"
+        
+        for i, user in enumerate(users_with_balance, 1):
+            name = user.first_name or "Пользователь"
+            username = f"@{user.username}" if user.username else ""
+            text += f"{i}. {name} {username}\n"
+            text += f"   💰 Баланс: {user.balance:.2f}₽\n"
+            text += f"   📦 Заказов: {user.total_orders}\n\n"
+    else:
+        text += "📭 Нет пользователей с положительным балансом"
+    
+    from keyboards.inline_keyboards import admin_users_back_kb
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=admin_users_back_kb()
+    )
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "admin_users_stats")
+async def admin_users_stats_callback(callback: CallbackQuery, session: AsyncSession):
+    """Показать детальную статистику пользователей"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    from repositories import UserRepository
+    from sqlalchemy import select, func
+    from database.models import User
+    
+    user_repo = UserRepository(session)
+    stats = await user_repo.get_stats()
+    
+    # Дополнительная статистика
+    users_with_orders = await session.scalar(select(func.count(User.id)).where(User.total_orders > 0))
+    users_with_balance = await session.scalar(select(func.count(User.id)).where(User.balance > 0))
+    avg_orders = await session.scalar(select(func.avg(User.total_orders)).where(User.total_orders > 0)) or 0
+    avg_spent = await session.scalar(select(func.avg(User.total_spent)).where(User.total_spent > 0)) or 0
+    
+    # Получаем пользователей за последние дни
+    from datetime import datetime, timedelta
+    recent_users_count = await session.scalar(
+        select(func.count(User.id)).where(
+            User.created_at >= datetime.now() - timedelta(days=7)
+        )
+    ) if hasattr(User, 'created_at') else 0
+    
+    text = (
+        "📊 <b>Детальная статистика пользователей</b>\n\n"
+        f"👥 <b>Общие показатели:</b>\n"
+        f"• Всего пользователей: {stats['total_users']}\n"
+        f"• С заказами: {users_with_orders or 0} ({(users_with_orders or 0) / max(stats['total_users'], 1) * 100:.1f}%)\n"
+        f"• С балансом: {users_with_balance or 0}\n"
+        f"• Новых за неделю: {recent_users_count or 0}\n\n"
+        f"💰 <b>Финансовые показатели:</b>\n"
+        f"• Общий оборот: {sum(u.total_spent for u in await user_repo.get_top_buyers(1000)):.2f}₽\n"
+        f"• Общий баланс: {stats['total_balance']:.2f}₽\n"
+        f"• Средняя сумма заказа: {avg_spent:.2f}₽\n\n"
+        f"📈 <b>Активность:</b>\n"
+        f"• Среднее количество заказов: {avg_orders:.1f}\n"
+        f"• Конверсия в покупатели: {(users_with_orders or 0) / max(stats['total_users'], 1) * 100:.1f}%"
+    )
+    
+    from keyboards.inline_keyboards import admin_users_back_kb
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=admin_users_back_kb()
     )
     await callback.answer()
 
