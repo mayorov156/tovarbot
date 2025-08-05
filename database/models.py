@@ -60,6 +60,7 @@ class Category(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=True)
+    manual_url: Mapped[str] = mapped_column(String(512), nullable=True)  # Ссылка на мануал/инструкцию
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     

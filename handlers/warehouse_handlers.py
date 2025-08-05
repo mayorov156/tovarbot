@@ -472,6 +472,20 @@ async def confirm_give_product(callback: CallbackQuery, state: FSMContext, sessi
             text=user_notification
         )
         
+        # Отправляем мануал, если он есть у категории
+        if updated_product.category and updated_product.category.manual_url:
+            manual_notification = WarehouseMessages.MANUAL_NOTIFICATION.format(
+                product_name=updated_product.name,
+                manual_url=updated_product.category.manual_url
+            )
+            
+            await callback.bot.send_message(
+                chat_id=data["recipient_id"],
+                text=manual_notification
+            )
+            
+            logger.info(f"WAREHOUSE: Sent manual to user {data['recipient_id']} for product '{updated_product.name}': {updated_product.category.manual_url}")
+        
     except Exception as e:
         logger.error(f"Failed to send notification to user {data['recipient_id']}: {e}")
     
@@ -530,13 +544,32 @@ async def enter_category_description(message: Message, state: FSMContext):
     if description == "-":
         description = None
     
-    data = await state.get_data()
     await state.update_data(description=description)
+    await state.set_state(WarehouseCreateCategoryStates.waiting_for_manual_url)
+    
+    await message.answer(
+        WarehouseMessages.CREATE_CATEGORY_MANUAL,
+        reply_markup=cancel_kb()
+    )
+
+
+@warehouse_router.message(WarehouseCreateCategoryStates.waiting_for_manual_url)
+async def enter_category_manual_url(message: Message, state: FSMContext):
+    """Ввод ссылки на мануал для категории"""
+    manual_url = message.text.strip()
+    
+    # Если отправили "-", то пропускаем мануал
+    if manual_url == "-":
+        manual_url = None
+    
+    data = await state.get_data()
+    await state.update_data(manual_url=manual_url)
     await state.set_state(WarehouseCreateCategoryStates.waiting_for_confirmation)
     
     confirmation_text = WarehouseMessages.CREATE_CATEGORY_CONFIRMATION.format(
         name=data["name"],
-        description=description or "Не указано"
+        description=data.get("description") or "Не указано",
+        manual_url=manual_url or "Не указано"
     )
     
     await message.answer(
@@ -555,6 +588,7 @@ async def confirm_create_category(callback: CallbackQuery, state: FSMContext, se
     category = await warehouse_service.create_category(
         name=data["name"],
         description=data.get("description"),
+        manual_url=data.get("manual_url"),
         admin_id=callback.from_user.id,
         admin_username=callback.from_user.username
     )
@@ -563,7 +597,8 @@ async def confirm_create_category(callback: CallbackQuery, state: FSMContext, se
         success_text = WarehouseMessages.CREATE_CATEGORY_SUCCESS.format(
             name=category.name,
             id=category.id,
-            description=category.description or "Не указано"
+            description=category.description or "Не указано",
+            manual_url=category.manual_url or "Не указано"
         )
         
         await callback.message.edit_text(

@@ -93,8 +93,8 @@ class WarehouseService:
             (success, content, updated_product)
         """
         try:
-            # Получаем товар
-            product = await self.product_repo.get_by_id(product_id)
+            # Получаем товар с категорией
+            product = await self.get_product_with_category(product_id)
             if not product:
                 return False, None, None
             
@@ -155,33 +155,52 @@ class WarehouseService:
         return await self.category_repo.get_by_id(category_id)
     
     async def find_user_by_username_or_id(self, identifier: str) -> Optional[User]:
-        """Найти пользователя по username или ID с нормализацией ввода"""
+        """Найти пользователя по username или ID с улучшенным поиском"""
         try:
             # Нормализуем ввод
-            identifier = self.normalize_user_input(identifier)
+            normalized = self.normalize_user_input(identifier)
             
-            if not identifier:
+            if not normalized:
+                logger.warning(f"WAREHOUSE: Empty identifier after normalization: '{identifier}'")
                 return None
             
             # Пробуем как ID (только цифры)
-            if identifier.isdigit():
-                user_id = int(identifier)
+            if normalized.isdigit():
+                user_id = int(normalized)
                 user = await self.user_repo.get_by_id(user_id)
                 if user:
                     logger.info(f"WAREHOUSE: Found user by ID {user_id}: @{user.username or 'no_username'}")
                     return user
+                else:
+                    logger.warning(f"WAREHOUSE: User with ID {user_id} not found or hasn't started the bot")
+                    return None
             
-            # Ищем по username
-            user = await self.user_repo.get_by_username(identifier)
+            # Поиск по username (несколько попыток)
+            
+            # 1. Точное совпадение
+            user = await self.user_repo.get_by_username(normalized)
             if user:
-                logger.info(f"WAREHOUSE: Found user by username {identifier}: ID {user.id}")
+                logger.info(f"WAREHOUSE: Found user by exact username match '{normalized}': ID {user.id}")
                 return user
             
-            logger.warning(f"WAREHOUSE: User not found by identifier: {identifier}")
+            # 2. Поиск без учета регистра
+            user = await self.user_repo.get_by_username_icase(normalized)
+            if user:
+                logger.info(f"WAREHOUSE: Found user by case-insensitive username '{normalized}': @{user.username} (ID {user.id})")
+                return user
+            
+            # 3. Поиск по частичному совпадению (для случаев когда username мог измениться)
+            users = await self.user_repo.search_users_by_username(normalized)
+            if users:
+                user = users[0]  # Берем первого найденного
+                logger.info(f"WAREHOUSE: Found user by partial username match '{normalized}': @{user.username} (ID {user.id})")
+                return user
+            
+            logger.warning(f"WAREHOUSE: User not found by identifier: '{identifier}' (normalized: '{normalized}')")
             return None
             
         except Exception as e:
-            logger.error(f"Error finding user by identifier {identifier}: {e}")
+            logger.error(f"Error finding user by identifier '{identifier}': {e}")
             return None
     
     def normalize_user_input(self, user_input: str) -> str:
@@ -302,6 +321,7 @@ class WarehouseService:
         self,
         name: str,
         description: Optional[str],
+        manual_url: Optional[str],
         admin_id: int,
         admin_username: Optional[str] = None
     ) -> Optional[Category]:
@@ -316,6 +336,7 @@ class WarehouseService:
             category = Category(
                 name=name,
                 description=description or "",
+                manual_url=manual_url,
                 is_active=True,
                 sort_order=0
             )
@@ -330,13 +351,13 @@ class WarehouseService:
                 admin_username=admin_username,
                 action="create_category",
                 quantity=1,
-                description=f"Создана категория: {name}"
+                description=f"Создана категория: {name}" + (f" с мануалом: {manual_url}" if manual_url else "")
             )
             
             await self.session.commit()
             await self.session.refresh(category)
             
-            logger.info(f"WAREHOUSE: Created category '{name}' (ID: {category.id}) by admin {admin_id}")
+            logger.info(f"WAREHOUSE: Created category '{name}' (ID: {category.id}) by admin {admin_id}" + (f" with manual: {manual_url}" if manual_url else ""))
             return category
             
         except Exception as e:

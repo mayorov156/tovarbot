@@ -21,10 +21,24 @@ class UserRepository(BaseRepository[User]):
         return await self.get_by_telegram_id(user_id)
     
     async def get_by_username(self, username: str) -> Optional[User]:
-        """Получить пользователя по username"""
+        """Получить пользователя по username (точное совпадение)"""
         stmt = select(User).where(User.username == username)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
+    
+    async def get_by_username_icase(self, username: str) -> Optional[User]:
+        """Получить пользователя по username без учета регистра"""
+        stmt = select(User).where(func.lower(User.username) == func.lower(username))
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+    
+    async def search_users_by_username(self, username_pattern: str) -> List[User]:
+        """Поиск пользователей по частичному совпадению username"""
+        stmt = select(User).where(
+            func.lower(User.username).contains(func.lower(username_pattern))
+        ).limit(10)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
     
     async def get_or_create_user(self, telegram_id: int, **user_data) -> User:
         """Получить или создать пользователя"""
