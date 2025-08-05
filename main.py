@@ -3,10 +3,11 @@ from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.types import ErrorEvent
 
 from config import settings
 from database import init_db, get_session
-from handlers import user_router, admin_router, callback_router
+from handlers import user_router, admin_router, callback_router, warehouse_router
 from utils import setup_logging
 
 # Настройка логирования
@@ -47,10 +48,11 @@ async def main():
     # Настраиваем зависимости
     await setup_dependencies(dp)
     
-    # Регистрируем роутеры
+    # Регистрируем роутеры (специфичные команды должны быть первыми)
     dp.include_router(user_router)
-    dp.include_router(callback_router)
     dp.include_router(admin_router)
+    dp.include_router(callback_router)
+    dp.include_router(warehouse_router)
     
     # Middleware для автоматического внедрения сессии БД
     @dp.message.middleware()
@@ -62,8 +64,9 @@ async def main():
     
     # Обработчик ошибок
     @dp.error()
-    async def error_handler(event, exception):
-        logger.error(f"Error occurred: {exception}")
+    async def error_handler(event: ErrorEvent):
+        # твоя логика логирования
+        print(f"Ошибка: {event.exception}")
         return True
     
     # Уведомляем админов о запуске

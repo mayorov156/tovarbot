@@ -13,6 +13,12 @@ class OrderStatus(Enum):
     CANCELLED = "cancelled"
 
 
+class ProductType(Enum):
+    ACCOUNT = "account"  # Логин/пароль
+    KEY = "key"          # Ключ активации
+    PROMO = "promo"      # Промокод
+
+
 class User(Base):
     __tablename__ = "users"
     
@@ -75,6 +81,10 @@ class Product(Base):
     # Категория
     category_id: Mapped[int] = mapped_column(Integer, ForeignKey("categories.id"), nullable=False)
     
+    # Тип товара
+    product_type: Mapped[str] = mapped_column(String(50), default=ProductType.KEY.value)
+    duration: Mapped[str] = mapped_column(String(100), nullable=True)  # Длительность (1 месяц, 12 мес., lifetime)
+    
     # Остатки
     stock_quantity: Mapped[int] = mapped_column(Integer, default=0)
     digital_content: Mapped[str] = mapped_column(Text, nullable=True)  # Цифровой товар (ключи, коды и т.д.)
@@ -93,6 +103,7 @@ class Product(Base):
     # Отношения
     category: Mapped["Category"] = relationship("Category", back_populates="products")
     orders: Mapped[list["Order"]] = relationship("Order", back_populates="product")
+    warehouse_logs: Mapped[list["WarehouseLog"]] = relationship("WarehouseLog", back_populates="product")
 
 
 class Order(Base):
@@ -149,3 +160,35 @@ class Referral(Base):
     # Отношения
     user: Mapped["User"] = relationship("User", back_populates="referral_records")
     order: Mapped["Order"] = relationship("Order")
+
+
+class WarehouseLog(Base):
+    __tablename__ = "warehouse_logs"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    
+    # Товар
+    product_id: Mapped[int] = mapped_column(Integer, ForeignKey("products.id"), nullable=False)
+    
+    # Администратор, выполнивший действие
+    admin_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    admin_username: Mapped[str] = mapped_column(String(255), nullable=True)
+    
+    # Получатель (для выдачи товара)
+    recipient_id: Mapped[int] = mapped_column(BigInteger, nullable=True)
+    recipient_username: Mapped[str] = mapped_column(String(255), nullable=True)
+    
+    # Действие
+    action: Mapped[str] = mapped_column(String(50), nullable=False)  # add_product, give_product, add_stock, remove_stock
+    quantity: Mapped[int] = mapped_column(Integer, default=1)
+    
+    # Содержимое выданного товара
+    delivered_content: Mapped[str] = mapped_column(Text, nullable=True)
+    
+    # Описание действия
+    description: Mapped[str] = mapped_column(Text, nullable=True)
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    
+    # Отношения
+    product: Mapped["Product"] = relationship("Product", back_populates="warehouse_logs")

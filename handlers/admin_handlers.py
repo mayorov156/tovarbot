@@ -9,7 +9,7 @@ from services import OrderService, ProductService, UserService
 from keyboards import (
     admin_menu_kb, admin_orders_kb, order_management_kb, back_button,
     warehouse_menu_kb, warehouse_products_kb, warehouse_product_actions_kb,
-    warehouse_categories_kb, confirm_cancel_kb, categories_kb
+    warehouse_categories_kb
 )
 from utils import format_order_info, format_stats, AdminStates
 from repositories import CategoryRepository
@@ -251,22 +251,7 @@ async def admin_stats_callback(callback: CallbackQuery, session: AsyncSession ):
     await callback.answer()
 
 
-@admin_router.callback_query(F.data == "admin_products")
-async def admin_products_callback(callback: CallbackQuery):
-    """Управление товарами (заглушка)"""
-    if not is_admin(callback.from_user.id):
-        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
-        return
-    
-    text = "🛍 <b>Управление товарами</b>\n\n"
-    text += "Функционал в разработке.\n"
-    text += "Для управления товарами используйте базу данных напрямую."
-    
-    await callback.message.edit_text(
-        text,
-        reply_markup=back_button("admin_menu")
-    )
-    await callback.answer()
+
 
 
 @admin_router.callback_query(F.data == "admin_categories")
@@ -279,6 +264,28 @@ async def admin_categories_callback(callback: CallbackQuery):
     text = "📂 <b>Управление категориями</b>\n\n"
     text += "Функционал в разработке.\n"
     text += "Для управления категориями используйте базу данных напрямую."
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=back_button("admin_menu")
+    )
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "admin_settings")
+async def admin_settings_callback(callback: CallbackQuery):
+    """Настройки системы"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    text = "⚙️ <b>Настройки системы</b>\n\n"
+    text += f"🤖 ID бота: {callback.bot.id}\n"
+    text += f"👥 Количество админов: {len(settings.ADMIN_IDS)}\n"
+    text += f"💰 Процент с рефералов: {settings.REFERRAL_REWARD_PERCENT}%\n"
+    text += f"🆘 Поддержка: @{settings.SUPPORT_USERNAME}\n"
+    text += f"📢 Канал заработка: {settings.EARNING_CHANNEL}\n\n"
+    text += "Для изменения настроек отредактируйте файл .env"
     
     await callback.message.edit_text(
         text,

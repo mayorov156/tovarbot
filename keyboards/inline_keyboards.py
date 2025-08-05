@@ -164,15 +164,18 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     
     builder.row(
-        InlineKeyboardButton(text="📦 Заказы", callback_data="admin_orders"),
-        InlineKeyboardButton(text="🛍 Товары", callback_data="admin_products")
+        InlineKeyboardButton(text="📦 Заказы", callback_data="admin_orders")
     )
     builder.row(
-        InlineKeyboardButton(text="📂 Категории", callback_data="admin_categories"),
+        InlineKeyboardButton(text="📂 Категории", callback_data="admin_categories")
+    )
+    builder.row(
         InlineKeyboardButton(text="👥 Пользователи", callback_data="admin_users")
     )
     builder.row(
-        InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats"),
+        InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")
+    )
+    builder.row(
         InlineKeyboardButton(text="⚙️ Настройки", callback_data="admin_settings")
     )
     builder.row(

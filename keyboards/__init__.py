@@ -18,6 +18,17 @@ from .inline_keyboards import (
     confirm_cancel_kb
 )
 
+from .warehouse_keyboards import (
+    product_type_kb,
+    warehouse_categories_select_kb,
+    warehouse_products_select_kb,
+    add_product_confirmation_kb,
+    give_product_confirmation_kb,
+    cancel_kb,
+    back_to_warehouse_kb,
+    warehouse_action_complete_kb
+)
+
 __all__ = [
     "main_menu_kb",
     "categories_kb", 
@@ -35,5 +46,14 @@ __all__ = [
     "warehouse_products_kb",
     "warehouse_product_actions_kb",
     "warehouse_categories_kb",
-    "confirm_cancel_kb"
+    "confirm_cancel_kb",
+    # Warehouse keyboards
+    "product_type_kb",
+    "warehouse_categories_select_kb",
+    "warehouse_products_select_kb",
+    "add_product_confirmation_kb",
+    "give_product_confirmation_kb",
+    "cancel_kb",
+    "back_to_warehouse_kb",
+    "warehouse_action_complete_kb"
 ]

@@ -30,3 +30,21 @@ class AdminStates(StatesGroup):
     waiting_for_stock_quantity = State()
     waiting_for_edit_product_field = State()
     waiting_for_new_product_value = State()
+
+
+class WarehouseAddProductStates(StatesGroup):
+    """Состояния для добавления товара на склад"""
+    waiting_for_category = State()
+    waiting_for_name = State()
+    waiting_for_type = State()
+    waiting_for_duration = State()
+    waiting_for_content = State()
+    waiting_for_price = State()
+    waiting_for_confirmation = State()
+
+
+class WarehouseGiveProductStates(StatesGroup):
+    """Состояния для выдачи товара со склада"""
+    waiting_for_product = State()
+    waiting_for_user = State()
+    waiting_for_confirmation = State()
