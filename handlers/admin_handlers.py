@@ -1,5 +1,5 @@
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, InlineKeyboardButton
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +12,7 @@ from keyboards import (
     warehouse_categories_kb
 )
 from utils import format_order_info, format_stats, AdminStates
+from utils.states import AdminSettingsStates
 from repositories import CategoryRepository
 from config import settings
 
@@ -258,25 +259,363 @@ async def admin_stats_callback(callback: CallbackQuery, session: AsyncSession ):
 
 
 @admin_router.callback_query(F.data == "admin_settings")
-async def admin_settings_callback(callback: CallbackQuery):
-    """Настройки системы"""
+async def admin_settings_callback(callback: CallbackQuery, session: AsyncSession):
+    """Главное меню настроек системы"""
     if not is_admin(callback.from_user.id):
         await callback.answer("❌ У вас нет прав доступа", show_alert=True)
         return
     
-    text = "⚙️ <b>Настройки системы</b>\n\n"
-    text += f"🤖 ID бота: {callback.bot.id}\n"
-    text += f"👥 Количество админов: {len(settings.ADMIN_IDS)}\n"
-    text += f"💰 Процент с рефералов: {settings.REFERRAL_REWARD_PERCENT}%\n"
-    text += f"🆘 Поддержка: @{settings.SUPPORT_USERNAME}\n"
-    text += f"📢 Канал заработка: {settings.EARNING_CHANNEL}\n\n"
-    text += "Для изменения настроек отредактируйте файл .env"
+    from services.settings_service import SettingsService
+    
+    settings_service = SettingsService(session)
+    
+    # Инициализируем настройки по умолчанию при первом заходе
+    await settings_service.initialize_default_settings()
+    
+    # Получаем количество настроек по категориям
+    categories = await settings_service.get_categories()
+    total_settings = len(await settings_service.get_editable_settings())
+    
+    text = (
+        "⚙️ <b>Настройки системы</b>\n\n"
+        "Здесь вы можете изменять параметры бота через удобный интерфейс:\n\n"
+        f"📊 <b>Доступно настроек:</b> {total_settings}\n"
+        f"📂 <b>Категорий:</b> {len(categories)}\n\n"
+        "Выберите категорию настроек или просмотрите все:"
+    )
+    
+    from keyboards.inline_keyboards import admin_settings_menu_kb
     
     await callback.message.edit_text(
         text,
-        reply_markup=back_button("admin_menu")
+        reply_markup=admin_settings_menu_kb()
     )
     await callback.answer()
+
+
+@admin_router.callback_query(F.data.startswith("admin_settings_category_"))
+async def admin_settings_category_callback(callback: CallbackQuery, session: AsyncSession):
+    """Показать настройки категории"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    category = callback.data.split("_")[-1]
+    
+    from services.settings_service import SettingsService
+    from keyboards.inline_keyboards import admin_settings_category_kb, admin_settings_back_kb
+    
+    settings_service = SettingsService(session)
+    settings = await settings_service.get_editable_settings(category)
+    
+    if not settings:
+        await callback.message.edit_text(
+            f"📂 <b>Категория: {category.title()}</b>\n\n❌ Настройки в данной категории не найдены.",
+            reply_markup=admin_settings_back_kb()
+        )
+        return
+    
+    category_names = {
+        "referral": "💰 Реферальная система",
+        "contacts": "📞 Контакты", 
+        "messages": "💬 Сообщения",
+        "financial": "💳 Финансы"
+    }
+    
+    text = f"{category_names.get(category, f'📂 {category.title()}')}\n\n"
+    text += f"Найдено настроек: {len(settings)}\n\nВыберите настройку для редактирования:"
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=admin_settings_category_kb(settings, category)
+    )
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "admin_settings_all")
+async def admin_settings_all_callback(callback: CallbackQuery, session: AsyncSession):
+    """Показать все настройки"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    from services.settings_service import SettingsService
+    from keyboards.inline_keyboards import admin_settings_category_kb, admin_settings_back_kb
+    
+    settings_service = SettingsService(session)
+    settings = await settings_service.get_editable_settings()
+    
+    if not settings:
+        await callback.message.edit_text(
+            "📋 <b>Все настройки</b>\n\n❌ Настройки не найдены.",
+            reply_markup=admin_settings_back_kb()
+        )
+        return
+    
+    await callback.message.edit_text(
+        f"📋 <b>Все настройки</b>\n\nВсего настроек: {len(settings)}\n\nВыберите настройку для редактирования:",
+        reply_markup=admin_settings_category_kb(settings, "all")
+    )
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data.startswith("admin_setting_edit_"))
+async def admin_setting_edit_callback(callback: CallbackQuery, session: AsyncSession):
+    """Показать интерфейс редактирования настройки"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    setting_id = int(callback.data.split("_")[-1])
+    
+    from services.settings_service import SettingsService
+    from keyboards.inline_keyboards import admin_setting_edit_kb, admin_settings_back_kb
+    
+    settings_service = SettingsService(session)
+    setting = await settings_service.get_setting_by_id(setting_id)
+    
+    if not setting:
+        await callback.message.edit_text(
+            "❌ Настройка не найдена",
+            reply_markup=admin_settings_back_kb()
+        )
+        return
+    
+    # Форматируем значение для отображения
+    current_value = setting.value
+    if setting.value_type == "bool":
+        current_value = "✅ Включено" if setting.value.lower() in ("true", "1", "yes", "on") else "❌ Выключено"
+    
+    text = (
+        f"⚙️ <b>Настройка: {setting.description or setting.key}</b>\n\n"
+        f"🔑 <b>Ключ:</b> <code>{setting.key}</code>\n"
+        f"📋 <b>Категория:</b> {setting.category}\n"
+        f"🔤 <b>Тип:</b> {setting.value_type}\n"
+        f"💾 <b>Текущее значение:</b>\n<code>{current_value}</code>\n\n"
+    )
+    
+    if setting.description:
+        text += f"📝 <b>Описание:</b> {setting.description}"
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=admin_setting_edit_kb(setting)
+    )
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data.startswith("admin_setting_change_"))
+async def admin_setting_change_callback(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Начать изменение значения настройки"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    setting_id = int(callback.data.split("_")[-1])
+    
+    from services.settings_service import SettingsService
+    from keyboards.inline_keyboards import admin_settings_back_kb
+    
+    settings_service = SettingsService(session)
+    setting = await settings_service.get_setting_by_id(setting_id)
+    
+    if not setting:
+        await callback.message.edit_text(
+            "❌ Настройка не найдена",
+            reply_markup=admin_settings_back_kb()
+        )
+        return
+    
+    await state.update_data(setting_id=setting_id)
+    await state.set_state(AdminSettingsStates.waiting_for_value)
+    
+    # Подсказки для разных типов
+    type_hints = {
+        "string": "Введите текстовое значение:",
+        "int": "Введите целое число:",
+        "float": "Введите число (можно с десятичной точкой):",
+        "bool": "Введите true/false, 1/0, yes/no, on/off:"
+    }
+    
+    hint = type_hints.get(setting.value_type, "Введите новое значение:")
+    
+    text = (
+        f"✏️ <b>Изменение настройки</b>\n\n"
+        f"⚙️ <b>Настройка:</b> {setting.description or setting.key}\n"
+        f"💾 <b>Текущее значение:</b> <code>{setting.value}</code>\n"
+        f"🔤 <b>Тип:</b> {setting.value_type}\n\n"
+        f"{hint}"
+    )
+    
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="❌ Отмена", callback_data=f"admin_setting_edit_{setting_id}")
+    )
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=builder.as_markup()
+    )
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data.startswith("admin_setting_toggle_"))
+async def admin_setting_toggle_callback(callback: CallbackQuery, session: AsyncSession):
+    """Переключить boolean настройку"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    setting_id = int(callback.data.split("_")[-1])
+    
+    from services.settings_service import SettingsService
+    settings_service = SettingsService(session)
+    
+    setting = await settings_service.get_setting_by_id(setting_id)
+    if not setting or setting.value_type != "bool":
+        await callback.answer("❌ Настройка не найдена или не является логической", show_alert=True)
+        return
+    
+    # Переключаем значение
+    current_value = setting.value.lower() in ("true", "1", "yes", "on")
+    new_value = not current_value
+    
+    success = await settings_service.set_setting(setting.key, new_value)
+    
+    if success:
+        await callback.answer(f"✅ Настройка обновлена: {new_value}")
+        # Обновляем отображение
+        await admin_setting_edit_callback(callback, session)
+    else:
+        await callback.answer("❌ Ошибка при обновлении настройки", show_alert=True)
+
+
+@admin_router.message(AdminSettingsStates.waiting_for_value)
+async def admin_setting_value_handler(message: Message, state: FSMContext, session: AsyncSession):
+    """Обработка нового значения настройки"""
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ У вас нет прав доступа")
+        return
+    
+    data = await state.get_data()
+    setting_id = data.get("setting_id")
+    
+    from services.settings_service import SettingsService
+    settings_service = SettingsService(session)
+    
+    setting = await settings_service.get_setting_by_id(setting_id)
+    if not setting:
+        await message.answer("❌ Настройка не найдена")
+        await state.clear()
+        return
+    
+    new_value = message.text.strip()
+    
+    # Валидация значения
+    try:
+        if setting.value_type == "int":
+            int(new_value)
+        elif setting.value_type == "float":
+            float(new_value)
+        elif setting.value_type == "bool":
+            if new_value.lower() not in ("true", "false", "1", "0", "yes", "no", "on", "off"):
+                raise ValueError("Неверное boolean значение")
+    except ValueError:
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        await message.answer(
+            f"❌ Неверный формат значения для типа {setting.value_type}.\n\n"
+            f"Попробуйте еще раз или нажмите Отмена.",
+            reply_markup=InlineKeyboardBuilder().row(
+                InlineKeyboardButton(text="❌ Отмена", callback_data=f"admin_setting_edit_{setting_id}")
+            ).as_markup()
+        )
+        return
+    
+    await state.update_data(new_value=new_value)
+    await state.set_state(AdminSettingsStates.waiting_for_confirmation)
+    
+    # Показываем превью изменения
+    old_display = setting.value
+    new_display = new_value
+    
+    if setting.value_type == "bool":
+        old_display = "✅ Включено" if setting.value.lower() in ("true", "1", "yes", "on") else "❌ Выключено"
+        new_display = "✅ Включено" if new_value.lower() in ("true", "1", "yes", "on") else "❌ Выключено"
+    
+    text = (
+        f"🔄 <b>Подтверждение изменения</b>\n\n"
+        f"⚙️ <b>Настройка:</b> {setting.description or setting.key}\n\n"
+        f"📥 <b>Старое значение:</b>\n<code>{old_display}</code>\n\n"
+        f"📤 <b>Новое значение:</b>\n<code>{new_display}</code>\n\n"
+        f"❓ Сохранить изменения?"
+    )
+    
+    from keyboards.inline_keyboards import admin_setting_confirm_kb
+    
+    await message.answer(
+        text,
+        reply_markup=admin_setting_confirm_kb(setting_id)
+    )
+
+
+@admin_router.callback_query(F.data.startswith("admin_setting_confirm_"))
+async def admin_setting_confirm_callback(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Подтвердить изменение настройки"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    setting_id = int(callback.data.split("_")[-1])
+    data = await state.get_data()
+    new_value = data.get("new_value")
+    
+    if not new_value:
+        await callback.answer("❌ Не найдено новое значение", show_alert=True)
+        return
+    
+    from services.settings_service import SettingsService
+    from keyboards.inline_keyboards import admin_settings_back_kb
+    
+    settings_service = SettingsService(session)
+    setting = await settings_service.get_setting_by_id(setting_id)
+    
+    if not setting:
+        await callback.message.edit_text(
+            "❌ Настройка не найдена",
+            reply_markup=admin_settings_back_kb()
+        )
+        await state.clear()
+        return
+    
+    # Конвертируем значение к нужному типу
+    converted_value = new_value
+    if setting.value_type == "int":
+        converted_value = int(new_value)
+    elif setting.value_type == "float":
+        converted_value = float(new_value)
+    elif setting.value_type == "bool":
+        converted_value = new_value.lower() in ("true", "1", "yes", "on")
+    
+    success = await settings_service.set_setting(setting.key, converted_value)
+    
+    if success:
+        await callback.message.edit_text(
+            f"✅ <b>Настройка успешно обновлена!</b>\n\n"
+            f"⚙️ <b>Настройка:</b> {setting.description or setting.key}\n"
+            f"💾 <b>Новое значение:</b> <code>{new_value}</code>\n\n"
+            f"Изменения вступили в силу немедленно.",
+            reply_markup=admin_settings_back_kb()
+        )
+        await callback.answer("✅ Настройка обновлена!")
+    else:
+        await callback.message.edit_text(
+            "❌ Ошибка при сохранении настройки. Попробуйте еще раз.",
+            reply_markup=admin_settings_back_kb()
+        )
+        await callback.answer("❌ Ошибка сохранения", show_alert=True)
+    
+    await state.clear()
 
 
 @admin_router.callback_query(F.data == "admin_users")
@@ -656,7 +995,7 @@ async def warehouse_history_callback(callback: CallbackQuery):
 
 @admin_router.callback_query(F.data == "warehouse_stats")
 async def warehouse_stats_callback(callback: CallbackQuery, session: AsyncSession):
-    """Статистика остатков товаров"""
+    """Статистика остатков товаров с группировкой по названиям"""
     if not is_admin(callback.from_user.id):
         await callback.answer("❌ У вас нет прав доступа", show_alert=True)
         return
@@ -673,32 +1012,124 @@ async def warehouse_stats_callback(callback: CallbackQuery, session: AsyncSessio
         await callback.answer()
         return
     
-    total_products = len(products)
-    in_stock = sum(1 for p in products if p.is_unlimited or p.stock_quantity > 0)
-    out_of_stock = total_products - in_stock
-    unlimited_products = sum(1 for p in products if p.is_unlimited)
+    # Группируем товары по названиям (приводим к нижнему регистру для группировки)
+    grouped_products = {}
     
-    total_stock_value = sum(
-        p.price * p.stock_quantity 
-        for p in products 
-        if not p.is_unlimited
+    for product in products:
+        # Нормализуем название (убираем лишние пробелы, приводим к нижнему регистру)
+        normalized_name = product.name.strip().lower()
+        
+        if normalized_name not in grouped_products:
+            grouped_products[normalized_name] = {
+                'original_name': product.name,  # Сохраняем оригинальное название
+                'total_stock': 0,
+                'unlimited_count': 0,
+                'products_count': 0,
+                'has_stock': False,
+                'total_value': 0
+            }
+        
+        group = grouped_products[normalized_name]
+        group['products_count'] += 1
+        
+        if product.is_unlimited:
+            group['unlimited_count'] += 1
+            group['has_stock'] = True
+        elif product.stock_quantity > 0:
+            group['total_stock'] += product.stock_quantity
+            group['has_stock'] = True
+            group['total_value'] += product.price * product.stock_quantity
+    
+    # Общая статистика
+    total_products = len(products)
+    total_groups = len(grouped_products)
+    in_stock_groups = sum(1 for g in grouped_products.values() if g['has_stock'])
+    out_of_stock_groups = total_groups - in_stock_groups
+    unlimited_groups = sum(1 for g in grouped_products.values() if g['unlimited_count'] > 0)
+    
+    total_stock_value = sum(g['total_value'] for g in grouped_products.values())
+    
+    text = "📈 <b>Статистика остатков (сгруппированная)</b>\n\n"
+    text += f"📦 Всего товаров: {total_products} ({total_groups} групп)\n"
+    text += f"🟢 Групп в наличии: {in_stock_groups}\n"
+    text += f"🔴 Групп без остатков: {out_of_stock_groups}\n"
+    text += f"♾️ Групп с безлимитом: {unlimited_groups}\n\n"
+    text += f"💰 Общая стоимость остатков: {total_stock_value:.2f}₽\n\n"
+    
+    # Товары с остатками (отсортированные по убыванию остатков)
+    stocked_groups = [
+        (name, data) for name, data in grouped_products.items() 
+        if data['has_stock']
+    ]
+    
+    # Сортируем: сначала с безлимитом, потом по убыванию остатков
+    stocked_groups.sort(
+        key=lambda x: (
+            -x[1]['unlimited_count'],  # Безлимитные сначала
+            -x[1]['total_stock']  # Потом по убыванию остатков
+        )
     )
     
-    text = "📈 <b>Статистика остатков</b>\n\n"
-    text += f"📦 Всего товаров: {total_products}\n"
-    text += f"🟢 В наличии: {in_stock}\n"
-    text += f"🔴 Нет в наличии: {out_of_stock}\n"
-    text += f"♾️ Неограниченные: {unlimited_products}\n\n"
-    text += f"💰 Стоимость остатков: {total_stock_value:.2f}₽\n\n"
+    if stocked_groups:
+        text += "<b>📊 Остатки по группам товаров:</b>\n"
+        for name, data in stocked_groups[:10]:  # Показываем топ-10
+            display_name = data['original_name']
+            
+            # Формируем строку остатков
+            stock_parts = []
+            if data['unlimited_count'] > 0:
+                stock_parts.append(f"∞x{data['unlimited_count']}")
+            if data['total_stock'] > 0:
+                stock_parts.append(str(data['total_stock']))
+            
+            stock_display = " + ".join(stock_parts)
+            
+            # Выбираем иконку в зависимости от остатков
+            if data['unlimited_count'] > 0:
+                icon = "♾️"
+            elif data['total_stock'] > 10:
+                icon = "🟢"
+            elif data['total_stock'] > 5:
+                icon = "🟡"
+            elif data['total_stock'] > 0:
+                icon = "⚠️"
+            else:
+                icon = "🔴"
+            
+            text += f"{icon} {display_name}: {stock_display}\n"
+        
+        if len(stocked_groups) > 10:
+            text += f"... и еще {len(stocked_groups) - 10} групп\n"
     
-    text += "<b>Товары с низкими остатками:</b>\n"
-    low_stock = [p for p in products if not p.is_unlimited and 0 < p.stock_quantity <= 5]
+    # Товары с критически низкими остатками
+    low_stock_groups = [
+        (name, data) for name, data in grouped_products.items()
+        if data['total_stock'] > 0 and data['total_stock'] <= 5 and data['unlimited_count'] == 0
+    ]
     
-    if low_stock:
-        for product in low_stock[:5]:  # Показываем только первые 5
-            text += f"⚠️ {product.name}: {product.stock_quantity}\n"
-    else:
-        text += "✅ Все товары в достаточном количестве"
+    if low_stock_groups:
+        text += "\n<b>⚠️ Критически низкие остатки:</b>\n"
+        low_stock_groups.sort(key=lambda x: x[1]['total_stock'])  # По возрастанию остатков
+        
+        for name, data in low_stock_groups[:5]:  # Показываем 5 самых критичных
+            text += f"⚠️ {data['original_name']}: {data['total_stock']}\n"
+    
+    # Товары без остатков
+    no_stock_groups = [
+        (name, data) for name, data in grouped_products.items()
+        if not data['has_stock']
+    ]
+    
+    if no_stock_groups:
+        text += f"\n<b>🔴 Товары без остатков:</b> {len(no_stock_groups)} групп\n"
+        if len(no_stock_groups) <= 5:
+            for name, data in no_stock_groups:
+                text += f"🔴 {data['original_name']}\n"
+        else:
+            # Показываем только первые 3
+            for name, data in no_stock_groups[:3]:
+                text += f"🔴 {data['original_name']}\n"
+            text += f"... и еще {len(no_stock_groups) - 3}\n"
     
     await callback.message.edit_text(
         text,

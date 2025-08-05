@@ -466,3 +466,105 @@ def admin_users_back_kb() -> InlineKeyboardMarkup:
     )
     
     return builder.as_markup()
+
+
+def admin_settings_menu_kb() -> InlineKeyboardMarkup:
+    """Меню настроек системы"""
+    builder = InlineKeyboardBuilder()
+    
+    builder.row(
+        InlineKeyboardButton(text="💰 Реферальная система", callback_data="admin_settings_category_referral")
+    )
+    builder.row(
+        InlineKeyboardButton(text="📞 Контакты", callback_data="admin_settings_category_contacts")
+    )
+    builder.row(
+        InlineKeyboardButton(text="💬 Сообщения", callback_data="admin_settings_category_messages")
+    )
+    builder.row(
+        InlineKeyboardButton(text="💳 Финансы", callback_data="admin_settings_category_financial")
+    )
+    builder.row(
+        InlineKeyboardButton(text="📋 Все настройки", callback_data="admin_settings_all")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔙 Админ меню", callback_data="admin_menu")
+    )
+    
+    return builder.as_markup()
+
+
+def admin_settings_category_kb(settings: List, category: str) -> InlineKeyboardMarkup:
+    """Клавиатура настроек в категории"""
+    builder = InlineKeyboardBuilder()
+    
+    for setting in settings:
+        # Показываем краткое значение настройки
+        value_preview = str(setting.value)
+        if len(value_preview) > 20:
+            value_preview = value_preview[:17] + "..."
+        
+        button_text = f"⚙️ {setting.description or setting.key}"
+        
+        builder.row(
+            InlineKeyboardButton(
+                text=button_text,
+                callback_data=f"admin_setting_edit_{setting.id}"
+            )
+        )
+    
+    builder.row(
+        InlineKeyboardButton(text="🔙 К настройкам", callback_data="admin_settings")
+    )
+    
+    return builder.as_markup()
+
+
+def admin_setting_edit_kb(setting) -> InlineKeyboardMarkup:
+    """Клавиатура редактирования конкретной настройки"""
+    builder = InlineKeyboardBuilder()
+    
+    builder.row(
+        InlineKeyboardButton(text="✏️ Изменить значение", callback_data=f"admin_setting_change_{setting.id}")
+    )
+    
+    # Для boolean настроек добавляем быстрые кнопки
+    if setting.value_type == "bool":
+        current_value = setting.value.lower() in ("true", "1", "yes", "on")
+        new_value = not current_value
+        
+        builder.row(
+            InlineKeyboardButton(
+                text=f"🔄 Переключить на {new_value}",
+                callback_data=f"admin_setting_toggle_{setting.id}"
+            )
+        )
+    
+    builder.row(
+        InlineKeyboardButton(text="🔙 Назад", callback_data=f"admin_settings_category_{setting.category}")
+    )
+    
+    return builder.as_markup()
+
+
+def admin_setting_confirm_kb(setting_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура подтверждения изменения настройки"""
+    builder = InlineKeyboardBuilder()
+    
+    builder.row(
+        InlineKeyboardButton(text="✅ Сохранить", callback_data=f"admin_setting_confirm_{setting_id}"),
+        InlineKeyboardButton(text="❌ Отмена", callback_data=f"admin_setting_edit_{setting_id}")
+    )
+    
+    return builder.as_markup()
+
+
+def admin_settings_back_kb() -> InlineKeyboardMarkup:
+    """Кнопка возврата к настройкам"""
+    builder = InlineKeyboardBuilder()
+    
+    builder.row(
+        InlineKeyboardButton(text="🔙 К настройкам", callback_data="admin_settings")
+    )
+    
+    return builder.as_markup()
