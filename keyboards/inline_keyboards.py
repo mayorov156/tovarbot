@@ -484,9 +484,9 @@ def admin_settings_menu_kb() -> InlineKeyboardMarkup:
     builder.row(
         InlineKeyboardButton(text="💳 Финансы", callback_data="admin_settings_category_financial")
     )
-    builder.row(
-        InlineKeyboardButton(text="📋 Все настройки", callback_data="admin_settings_all")
-    )
+    # builder.row(
+    #     InlineKeyboardButton(text="📋 Все настройки", callback_data="admin_settings_all")
+    # )
     builder.row(
         InlineKeyboardButton(text="🔙 Админ меню", callback_data="admin_menu")
     )

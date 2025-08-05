@@ -159,7 +159,7 @@ class WarehouseService:
         return await self.category_repo.get_by_id(category_id)
     
     async def find_user_by_username_or_id(self, identifier: str) -> Optional[User]:
-        """Найти пользователя по username или ID с улучшенным поиском"""
+        """Улучшенный поиск пользователя по username или ID с множественными стратегиями"""
         try:
             # Нормализуем ввод
             normalized = self.normalize_user_input(identifier)
@@ -168,39 +168,58 @@ class WarehouseService:
                 logger.warning(f"WAREHOUSE: Empty identifier after normalization: '{identifier}'")
                 return None
             
-            # Пробуем как ID (только цифры)
+            # Стратегия 1: Пробуем как Telegram ID (только цифры)
             if normalized.isdigit():
                 user_id = int(normalized)
                 user = await self.user_repo.get_by_id(user_id)
                 if user:
-                    logger.info(f"WAREHOUSE: Found user by ID {user_id}: @{user.username or 'no_username'}")
+                    logger.info(f"WAREHOUSE: Found user by Telegram ID {user_id}: @{user.username or 'no_username'}")
                     return user
                 else:
-                    logger.warning(f"WAREHOUSE: User with ID {user_id} not found or hasn't started the bot")
-                    return None
+                    logger.info(f"WAREHOUSE: User with ID {user_id} not found, trying as username...")
+                    # Не возвращаем None сразу, продолжаем поиск как username
             
-            # Поиск по username (несколько попыток)
-            
-            # 1. Точное совпадение
+            # Стратегия 2: Точное совпадение по username (с учетом регистра)
             user = await self.user_repo.get_by_username(normalized)
             if user:
-                logger.info(f"WAREHOUSE: Found user by exact username match '{normalized}': ID {user.id}")
+                logger.info(f"WAREHOUSE: Found user by exact username '{normalized}': ID {user.id}")
                 return user
             
-            # 2. Поиск без учета регистра
+            # Стратегия 3: Поиск без учета регистра
             user = await self.user_repo.get_by_username_icase(normalized)
             if user:
                 logger.info(f"WAREHOUSE: Found user by case-insensitive username '{normalized}': @{user.username} (ID {user.id})")
                 return user
             
-            # 3. Поиск по частичному совпадению (для случаев когда username мог измениться)
+            # Стратегия 4: Поиск по частичному совпадению username
             users = await self.user_repo.search_users_by_username(normalized)
             if users:
-                user = users[0]  # Берем первого найденного
-                logger.info(f"WAREHOUSE: Found user by partial username match '{normalized}': @{user.username} (ID {user.id})")
+                # Если найдено несколько, предпочитаем точное совпадение
+                for user in users:
+                    if user.username and user.username.lower() == normalized.lower():
+                        logger.info(f"WAREHOUSE: Found user by partial search exact match '{normalized}': @{user.username} (ID {user.id})")
+                        return user
+                
+                # Если точного совпадения нет, берем первого найденного
+                user = users[0]
+                logger.info(f"WAREHOUSE: Found user by partial username search '{normalized}': @{user.username} (ID {user.id})")
                 return user
             
-            logger.warning(f"WAREHOUSE: User not found by identifier: '{identifier}' (normalized: '{normalized}')")
+            # Стратегия 5: Поиск по first_name для случаев, когда нет username
+            if not normalized.isdigit():
+                from sqlalchemy import select, func
+                stmt = select(User).where(
+                    func.lower(User.first_name).contains(func.lower(normalized))
+                ).limit(5)
+                result = await self.session.execute(stmt)
+                users_by_name = list(result.scalars().all())
+                
+                if users_by_name:
+                    user = users_by_name[0]
+                    logger.info(f"WAREHOUSE: Found user by first_name search '{normalized}': {user.first_name} (ID {user.id})")
+                    return user
+            
+            logger.warning(f"WAREHOUSE: User not found by any strategy for identifier: '{identifier}' (normalized: '{normalized}')")
             return None
             
         except Exception as e:
@@ -434,17 +453,17 @@ class WarehouseService:
                 
                 # Проверяем формат содержимого
                 if product_type == ProductType.ACCOUNT.value:
-                    if ":" not in content or len(content.split(":")) < 2:
-                        report['invalid_format'] += 1
-                        report['errors'].append(f"Строка {i}: неверный формат (ожидается логин:пароль)")
-                        continue
-                    
-                    # Проверяем, что логин и пароль не пустые
-                    parts = content.split(":", 1)
-                    if not parts[0].strip() or not parts[1].strip():
-                        report['invalid_format'] += 1
-                        report['errors'].append(f"Строка {i}: логин или пароль пустые")
-                        continue
+                    # Используем улучшенную валидацию для аккаунтов
+                    parsed_lines = self.parse_content_lines(content, product_type)
+                    if not parsed_lines or parsed_lines[0] != content:
+                        # Пробуем нормализовать формат
+                        normalized_content = self._normalize_account_content(content)
+                        if not normalized_content:
+                            report['invalid_format'] += 1
+                            report['errors'].append(f"Строка {i}: неверный формат (ожидается логин:пароль или логин|пароль)")
+                            continue
+                        else:
+                            content = normalized_content  # Используем нормализованную версию
                 
                 # Проверяем дубли в текущем наборе
                 if content.lower() in unique_contents:
@@ -528,16 +547,38 @@ class WarehouseService:
             return [], report
     
     def parse_content_lines(self, content_text: str, product_type: str) -> List[str]:
-        """Парсинг строк контента в зависимости от типа товара"""
+        """Парсинг строк контента в зависимости от типа товара с улучшенной поддержкой форматов"""
         lines = [line.strip() for line in content_text.split('\n') if line.strip()]
         
         # Проверяем формат в зависимости от типа
         if product_type == ProductType.ACCOUNT.value:
-            # Для аккаунтов ожидаем login:password
+            # Для аккаунтов поддерживаем различные форматы разделителей
             valid_lines = []
             for line in lines:
-                if ':' in line and len(line.split(':')) >= 2:
+                # Попробуем различные разделители: :, |, ;, tab, двойной пробел
+                separators = [':', '|', ';', '\t', '  ']
+                normalized_line = None
+                
+                for separator in separators:
+                    if separator in line:
+                        parts = [part.strip() for part in line.split(separator) if part.strip()]
+                        if len(parts) >= 2:
+                            # Берем первые две части как логин:пароль, остальное игнорируем
+                            normalized_line = f"{parts[0]}:{parts[1]}"
+                            break
+                
+                # Если не нашли разделители, но есть пробелы
+                if not normalized_line and ' ' in line:
+                    parts = [part.strip() for part in line.split() if part.strip()]
+                    if len(parts) >= 2:
+                        # Берем первые две части
+                        normalized_line = f"{parts[0]}:{parts[1]}"
+                
+                if normalized_line:
+                    valid_lines.append(normalized_line)
+                elif ':' in line:  # Оставляем старую логику как fallback
                     valid_lines.append(line)
+                    
             return valid_lines
         else:
             # Для ключей и промокодов просто возвращаем строки
@@ -599,6 +640,29 @@ class WarehouseService:
         except Exception as e:
             return False, {"error": f"Ошибка парсинга: {str(e)}"}
     
+    def _normalize_account_content(self, content: str) -> Optional[str]:
+        """Нормализовать содержимое аккаунта к формату логин:пароль"""
+        try:
+            # Попробуем различные разделители
+            separators = [':', '|', ';', '\t', '  ']
+            
+            for separator in separators:
+                if separator in content:
+                    parts = [part.strip() for part in content.split(separator) if part.strip()]
+                    if len(parts) >= 2 and parts[0] and parts[1]:
+                        return f"{parts[0]}:{parts[1]}"
+            
+            # Если не нашли разделители, попробуем пробелы
+            if ' ' in content:
+                parts = [part.strip() for part in content.split() if part.strip()]
+                if len(parts) >= 2 and parts[0] and parts[1]:
+                    return f"{parts[0]}:{parts[1]}"
+            
+            return None
+            
+        except Exception:
+            return None
+
     async def _check_content_duplicate(self, content: str, product_type: str) -> Optional[Product]:
         """Проверить, существует ли товар с таким же содержимым"""
         try:
@@ -690,7 +754,7 @@ class WarehouseService:
             return None
     
     async def get_category_stats(self) -> List[dict]:
-        """Получить статистику товаров по категориям"""
+        """Получить статистику товаров по категориям с анализом дубликатов"""
         from sqlalchemy import func
         try:
             # Получаем все категории с подсчетом товаров
@@ -727,12 +791,16 @@ class WarehouseService:
                 unlimited_result = await self.session.execute(unlimited_stmt)
                 unlimited_count = unlimited_result.scalar() or 0
                 
+                # Анализируем дубликаты по названиям в категории
+                duplicates_info = await self._analyze_category_duplicates(row.id)
+                
                 category_stats.append({
                     'id': row.id,
                     'name': row.name,
                     'total_products': row.total_products or 0,
                     'total_stock': row.total_stock or 0,
-                    'unlimited_products': unlimited_count
+                    'unlimited_products': unlimited_count,
+                    'duplicates_info': duplicates_info
                 })
             
             return category_stats
@@ -740,3 +808,143 @@ class WarehouseService:
         except Exception as e:
             logger.error(f"Error getting category stats: {e}")
             return []
+
+    async def _analyze_category_duplicates(self, category_id: int) -> dict:
+        """Анализировать дубликаты товаров в категории по названиям"""
+        try:
+            from sqlalchemy import func, text
+            
+            # Получаем все товары в категории
+            stmt = select(Product).where(
+                and_(
+                    Product.category_id == category_id,
+                    Product.is_active == True
+                )
+            ).order_by(Product.name, Product.id)
+            
+            result = await self.session.execute(stmt)
+            products = list(result.scalars().all())
+            
+            # Группируем по нормализованным названиям
+            grouped_products = {}
+            for product in products:
+                # Нормализуем название (убираем номера, лишние пробелы)
+                normalized_name = self._normalize_product_name(product.name)
+                
+                if normalized_name not in grouped_products:
+                    grouped_products[normalized_name] = {
+                        'original_name': product.name,
+                        'products': [],
+                        'total_stock': 0,
+                        'has_unlimited': False
+                    }
+                
+                group = grouped_products[normalized_name]
+                group['products'].append({
+                    'id': product.id,
+                    'name': product.name,
+                    'stock': product.stock_quantity,
+                    'is_unlimited': product.is_unlimited,
+                    'price': product.price
+                })
+                
+                if product.is_unlimited:
+                    group['has_unlimited'] = True
+                else:
+                    group['total_stock'] += product.stock_quantity
+            
+            # Находим "переполненные" (дублирующиеся) товары
+            overflow_products = {}
+            for normalized_name, group in grouped_products.items():
+                if len(group['products']) > 1:  # Есть дубликаты
+                    overflow_products[normalized_name] = {
+                        'original_name': group['original_name'],
+                        'count': len(group['products']),
+                        'total_stock': group['total_stock'],
+                        'has_unlimited': group['has_unlimited'],
+                        'products': group['products']
+                    }
+            
+            return {
+                'total_unique_names': len(grouped_products),
+                'overflow_count': len(overflow_products),
+                'overflow_products': overflow_products
+            }
+            
+        except Exception as e:
+            logger.error(f"Error analyzing duplicates for category {category_id}: {e}")
+            return {'total_unique_names': 0, 'overflow_count': 0, 'overflow_products': {}}
+
+    def _normalize_product_name(self, name: str) -> str:
+        """Нормализовать название товара для поиска дубликатов"""
+        import re
+        
+        # Убираем номера в конце названия типа "#1", "#2", "№1"
+        normalized = re.sub(r'\s*[#№]\d+\s*$', '', name.strip())
+        
+        # Убираем лишние пробелы и приводим к нижнему регистру
+        normalized = ' '.join(normalized.split()).lower()
+        
+        return normalized
+
+    async def get_smart_warehouse_stats(self) -> dict:
+        """Получить умную статистику склада с анализом переполненных товаров"""
+        try:
+            category_stats = await self.get_category_stats()
+            
+            # Общая статистика
+            total_categories = len(category_stats)
+            total_products = sum(cat['total_products'] for cat in category_stats)
+            total_stock = sum(cat['total_stock'] for cat in category_stats)
+            total_unlimited = sum(cat['unlimited_products'] for cat in category_stats)
+            
+            # Анализируем переполненные товары
+            overflow_categories = []
+            total_overflow_products = 0
+            
+            for category in category_stats:
+                duplicates = category['duplicates_info']
+                if duplicates['overflow_count'] > 0:
+                    overflow_categories.append({
+                        'category_name': category['name'],
+                        'overflow_count': duplicates['overflow_count'],
+                        'overflow_products': duplicates['overflow_products']
+                    })
+                    total_overflow_products += duplicates['overflow_count']
+            
+            # Находим самые переполненные товары
+            top_overflow = []
+            for category in overflow_categories:
+                for name, info in category['overflow_products'].items():
+                    top_overflow.append({
+                        'category': category['category_name'],
+                        'name': info['original_name'],
+                        'count': info['count'],
+                        'total_stock': info['total_stock'],
+                        'has_unlimited': info['has_unlimited'],
+                        'products': info['products']
+                    })
+            
+            # Сортируем по количеству дубликатов
+            top_overflow.sort(key=lambda x: x['count'], reverse=True)
+            
+            return {
+                'general': {
+                    'total_categories': total_categories,
+                    'total_products': total_products,
+                    'total_stock': total_stock,
+                    'total_unlimited': total_unlimited
+                },
+                'overflow': {
+                    'categories_with_overflow': len(overflow_categories),
+                    'total_overflow_products': total_overflow_products,
+                    'top_overflow': top_overflow[:10]  # Топ-10 самых переполненных
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting smart warehouse stats: {e}")
+            return {
+                'general': {'total_categories': 0, 'total_products': 0, 'total_stock': 0, 'total_unlimited': 0},
+                'overflow': {'categories_with_overflow': 0, 'total_overflow_products': 0, 'top_overflow': []}
+            }
