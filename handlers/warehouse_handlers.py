@@ -1386,28 +1386,8 @@ async def confirm_quick_give_product(callback: CallbackQuery, state: FSMContext,
 
 # ========== ОБНОВЛЕННЫЕ ОБРАБОТЧИКИ ==========
 
-@warehouse_router.callback_query(F.data == "warehouse_all_products")  
-async def warehouse_all_products_new(callback: CallbackQuery, session: AsyncSession):
-    """Показать все товары с управлением"""
-    if not is_admin(callback.from_user.id):
-        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
-        return
-    
-    warehouse_service = WarehouseService(session)
-    products = await warehouse_service.get_available_products()
-    
-    if not products:
-        await callback.message.edit_text(
-            "📦 <b>Все товары</b>\n\n❌ Товары не найдены.",
-            reply_markup=back_to_warehouse_kb()
-        )
-        return
-    
-    await callback.message.edit_text(
-        f"📦 <b>Все товары</b>\n\nВсего товаров: {len(products)}",
-        reply_markup=warehouse_all_products_kb(products)
-    )
-    await callback.answer()
+# УДАЛЕН: Дублирующий обработчик warehouse_all_products_new
+# Используется warehouse_all_products_callback на строке 2537
 
 
 @warehouse_router.callback_query(F.data.startswith("warehouse_all_products_page_"))
