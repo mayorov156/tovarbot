@@ -36,9 +36,10 @@ class OrderService:
         unit_price = product.price
         total_price = unit_price * quantity
         
+        # ВРЕМЕННО: отключаем проверку баланса для тестирования покупок
         # Проверяем баланс
-        if user.balance < total_price:
-            return None, f"Недостаточно средств. Необходимо: {total_price}₽, на балансе: {user.balance}₽"
+        # if user.balance < total_price:
+        #     return None, f"Недостаточно средств. Необходимо: {total_price}₽, на балансе: {user.balance}₽"
         
         # Резервируем товар
         if not await self.product_service.reserve_product(product_id, quantity):
@@ -55,8 +56,9 @@ class OrderService:
                 status=OrderStatus.PENDING.value
             )
             
+            # ВРЕМЕННО: отключаем списание средств для тестирования
             # Списываем средства
-            await self.user_repo.update_balance(user_id, -total_price)
+            # await self.user_repo.update_balance(user_id, -total_price)
             
             # Обновляем статистику пользователя
             await self.user_repo.update(

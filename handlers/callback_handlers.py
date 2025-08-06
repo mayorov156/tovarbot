@@ -132,7 +132,7 @@ async def product_detail_callback(callback: CallbackQuery, session: AsyncSession
     
     await callback.message.edit_text(
         text,
-        reply_markup=product_detail_kb(product)
+        reply_markup=product_detail_kb(product, user_can_buy=True)
     )
     await callback.answer()
 
@@ -140,37 +140,60 @@ async def product_detail_callback(callback: CallbackQuery, session: AsyncSession
 @callback_router.callback_query(F.data.startswith("buy_"))
 async def buy_product_callback(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     """Начать покупку товара"""
-    product_id = int(callback.data.split("_")[1])
-    log_user_action(callback.from_user.id, "buy_attempt", f"Попытка покупки товара {product_id}")
-    
-    # Сохраняем ID товара в состоянии
-    await state.update_data(product_id=product_id)
-    await state.set_state(OrderForm.waiting_for_confirmation)
-    
-    order_service = OrderService(session)
-    
-    # Создаем заказ
-    order, message = await order_service.create_order(
-        user_id=callback.from_user.id,
-        product_id=product_id,
-        quantity=1
-    )
-    
-    if not order:
-        await callback.answer(f"❌ {message}", show_alert=True)
-        await state.clear()
+    try:
+        product_id = int(callback.data.split("_")[1])
+        print(f"🛒 DEBUG: Пользователь {callback.from_user.id} пытается купить товар {product_id}")
+        log_user_action(callback.from_user.id, "buy_attempt", f"Попытка покупки товара {product_id}")
+        
+        # Сохраняем ID товара в состоянии
+        await state.update_data(product_id=product_id)
+        await state.set_state(OrderForm.waiting_for_confirmation)
+        
+        print(f"🛒 DEBUG: Состояние FSM установлено в waiting_for_confirmation")
+    except Exception as e:
+        print(f"❌ DEBUG: Ошибка в начале buy_product_callback: {e}")
+        await callback.answer("❌ Произошла ошибка. Попробуйте еще раз.", show_alert=True)
         return
     
-    # Показываем подтверждение
-    text = f"🛒 <b>Подтверждение заказа</b>\n\n"
-    text += format_order_info(order)
-    text += f"\n💰 К списанию: <b>{order.total_price:.2f}₽</b>"
-    
-    await callback.message.edit_text(
-        text,
-        reply_markup=order_confirmation_kb(order.id)
-    )
-    await callback.answer()
+    try:
+        order_service = OrderService(session)
+        print(f"🛒 DEBUG: OrderService создан")
+        
+        # Создаем заказ
+        print(f"🛒 DEBUG: Создаем заказ для пользователя {callback.from_user.id}, товар {product_id}")
+        order, message = await order_service.create_order(
+            user_id=callback.from_user.id,
+            product_id=product_id,
+            quantity=1
+        )
+        
+        print(f"🛒 DEBUG: Результат создания заказа: order={order is not None}, message='{message}'")
+        
+        if not order:
+            print(f"❌ DEBUG: Заказ не создан: {message}")
+            await callback.answer(f"❌ {message}", show_alert=True)
+            await state.clear()
+            return
+        
+        # Показываем подтверждение
+        print(f"🛒 DEBUG: Показываем подтверждение заказа #{order.id}")
+        text = f"🛒 <b>Подтверждение заказа</b>\n\n"
+        text += format_order_info(order)
+        text += f"\n💰 К списанию: <b>{order.total_price:.2f}₽</b>"
+        
+        await callback.message.edit_text(
+            text,
+            reply_markup=order_confirmation_kb(order.id)
+        )
+        await callback.answer()
+        print(f"✅ DEBUG: Подтверждение заказа отправлено успешно")
+        
+    except Exception as e:
+        print(f"❌ DEBUG: Ошибка в buy_product_callback: {e}")
+        import traceback
+        traceback.print_exc()
+        await callback.answer("❌ Произошла ошибка при создании заказа", show_alert=True)
+        await state.clear()
 
 
 @callback_router.callback_query(F.data.startswith("confirm_order_"))
