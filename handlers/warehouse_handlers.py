@@ -3,6 +3,7 @@
 import logging
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message, InlineKeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,7 +20,8 @@ from keyboards.warehouse_keyboards import (
     warehouse_add_menu_kb, warehouse_quick_master_kb, category_created_kb,
     warehouse_categories_compact_kb, warehouse_category_products_kb, warehouse_give_menu_kb,
     warehouse_main_categories_kb, warehouse_product_detail_kb, warehouse_product_action_complete_kb,
-    warehouse_display_settings_kb
+    warehouse_display_settings_kb, warehouse_error_recovery_kb, warehouse_categories_management_kb,
+    warehouse_category_management_kb
 )
 from services.warehouse_service import WarehouseService
 
@@ -263,9 +265,11 @@ async def confirm_add_product(callback: CallbackQuery, state: FSMContext, sessio
     )
     
     if not is_valid:
+        # Получаем category_id для контекстного возврата
+        category_id = data.get("category_id")
         await callback.message.edit_text(
-            f"❌ Ошибка валидации: {error_message}",
-            reply_markup=back_to_warehouse_kb()
+            f"❌ <b>Ошибка валидации</b>\n\n{error_message}\n\n💡 Проверьте данные и попробуйте снова:",
+            reply_markup=warehouse_error_recovery_kb(category_id, "add_product")
         )
         await state.clear()
         return
@@ -294,9 +298,13 @@ async def confirm_add_product(callback: CallbackQuery, state: FSMContext, sessio
             reply_markup=warehouse_action_complete_kb()
         )
     else:
+        # Ошибка добавления товара - предлагаем повторить попытку
+        category_id = data.get("category_id")
         await callback.message.edit_text(
-            "❌ Ошибка при добавлении товара. Попробуйте еще раз.",
-            reply_markup=back_to_warehouse_kb()
+            "❌ <b>Ошибка при добавлении товара</b>\n\n"
+            "Возможно, товар с таким названием уже существует или произошла ошибка базы данных.\n\n"
+            "💡 Попробуйте еще раз или проверьте данные:",
+            reply_markup=warehouse_error_recovery_kb(category_id, "add_product")
         )
     
     await state.clear()
@@ -739,22 +747,27 @@ async def mass_add_enter_price(message: Message, state: FSMContext):
         content_format = (
             "<b>👤 Массовое добавление аккаунтов</b>\n\n"
             "<b>📋 Поддерживаемые форматы:</b>\n"
-            "• <code>логин:пароль</code> (двоеточие)\n"
-            "• <code>логин|пароль</code> (вертикальная черта)\n"
-            "• <code>логин пароль</code> (пробел)\n"
-            "• <code>логин;пароль</code> (точка с запятой)\n\n"
+            "• <code>email:password</code> (двоеточие)\n"
+            "• <code>email|password</code> (вертикальная черта)\n"
+            "• <code>email password</code> (пробел)\n"
+            "• <code>email;password</code> (точка с запятой)\n"
+            "• <code>email|password|optional|data</code> (с дополнительными данными)\n\n"
             "<b>💡 Примеры реальных аккаунтов:</b>\n"
             "<code>user@example.com:password123\n"
-            "user2@example.com:mypassword456\n"
-            "testuser@gmail.com | secret789\n"
-            "admin@service.com;adminpass2024\n"
-            "demo_user@mail.ru strongpass</code>\n\n"
-            "<b>✅ Советы для массового импорта:</b>\n"
-            "• Копируйте данные из Excel/Google Sheets\n"
-            "• Проверьте что нет пустых строк\n"
-            "• Одна строка = один аккаунт\n"
-            "• Система автоматически удалит дубликаты\n\n"
-            "⚠️ <i>Дополнительные данные после пароля игнорируются</i>"
+            "user2@example.com|mypassword456\n"
+            "testuser@gmail.com | secret789 | backup@mail.com\n"
+            "admin@service.com;adminpass2024;VIP\n"
+            "premium@user.net strongpass extra_info</code>\n\n"
+            "<b>✅ Гибкий формат данных:</b>\n"
+            "• Основные: email и password (обязательно)\n"
+            "• Дополнительные: backup email, статус, заметки\n"
+            "• Поддержка любых разделителей: : | ; пробел TAB\n"
+            "• Копирование из Excel/Sheets с сохранением структуры\n\n"
+            "<b>✅ Автоматическая обработка:</b>\n"
+            "• Проверка уникальности по email\n"
+            "• Удаление пустых строк и лишних пробелов\n"
+            "• Валидация формата email\n\n"
+            "📝 <i>Каждая строка = 1 аккаунт</i>"
         )
     elif product_type == ProductType.KEY.value:
         content_format = (
@@ -778,21 +791,23 @@ async def mass_add_enter_price(message: Message, state: FSMContext):
             "<b>🎫 Массовое добавление промокодов</b>\n\n"
             "<b>📋 Формат:</b> промокоды, каждый с новой строки\n\n"
             "<b>💡 Примеры промокодов Perplexity:</b>\n"
-            "<code>hH7LmWGWuEcUqoxKzGlPMqR2xF8vN3dL\n"
+            "<code>CODE-1-AAAA-BBBB\n"
+            "CODE-2-CCCC-DDDD\n"
+            "hH7LmWGWuEcUqoxKzGlPMqR2xF8vN3dL\n"
             "Rz8yxKPM0bt1O1mOx5UqA7wS9pE2nK4Y\n"
-            "0yc4cKNhftkrzF7dmLNO6vP8qW1xR5uI\n"
-            "mT3nK7bV9dF2sL4xW8qE1pR6yU0cH5zA\n"
-            "pL9sK2dR7fN3mX6qW4tE8yV1cB5uH0zG</code>\n\n"
-            "<b>💡 Или короткие промокоды:</b>\n"
+            "0yc4cKNhftkrzF7dmLNO6vP8qW1xR5uI</code>\n\n"
+            "<b>💡 Другие форматы промокодов:</b>\n"
             "<code>SAVE20OFF\n"
-            "DISCOUNT50\n"
-            "PROMO2024\n"
-            "WINTER25</code>\n\n"
+            "DISCOUNT-2024-WINTER\n"
+            "PRO_ACCESS_2024\n"
+            "VIP-MEMBER-12345\n"
+            "SPECIAL.OFFER.789</code>\n\n"
             "<b>✅ Советы для массового импорта:</b>\n"
-            "• Можно копировать из файлов/email\n"
-            "• Любая длина промокодов\n"
-            "• Автоматическая проверка дубликатов\n"
-            "• Пробелы и переносы обрабатываются\n\n"
+            "• Копируйте промокоды из Excel/Google Sheets\n"
+            "• Поддерживаются любые символы: дефисы, точки, подчеркивания\n"
+            "• Автоматическая проверка уникальности\n"
+            "• Пустые строки и лишние пробелы игнорируются\n"
+            "• Длина промокода: от 5 до 64 символов\n\n"
             "📝 <i>Каждая строка = 1 промокод</i>"
         )
     
@@ -960,9 +975,27 @@ async def confirm_mass_add(callback: CallbackQuery, state: FSMContext, session: 
         if len(report['errors']) > 8:
             error_text += f"• ... и еще {len(report['errors']) - 8} ошибок"
         
+        # Возвращаемся в категорию с возможностью повторить попытку
+        category_id = data["category_id"]
+        
+        # Создаем клавиатуру с повтором массового добавления
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            InlineKeyboardButton(text="🔄 Попробовать еще раз", callback_data=f"warehouse_mass_add_to_category_{category_id}"),
+            InlineKeyboardButton(text="📂 К категории", callback_data=f"warehouse_show_category_{category_id}_0")
+        )
+        builder.row(
+            InlineKeyboardButton(text="➕ Добавить один товар", callback_data=f"warehouse_add_to_category_{category_id}"),
+            InlineKeyboardButton(text="⚡ Быстрое добавление", callback_data=f"warehouse_quick_add_to_category_{category_id}")
+        )
+        builder.row(
+            InlineKeyboardButton(text="🏪 Главное меню склада", callback_data="warehouse_menu"),
+            InlineKeyboardButton(text="🔙 Админ меню", callback_data="admin_menu")
+        )
+        
         await callback.message.edit_text(
             error_text,
-            reply_markup=back_to_warehouse_kb()
+            reply_markup=builder.as_markup()
         )
     
     await state.clear()
@@ -1375,6 +1408,41 @@ async def warehouse_all_products_new(callback: CallbackQuery, session: AsyncSess
         reply_markup=warehouse_all_products_kb(products)
     )
     await callback.answer()
+
+
+@warehouse_router.callback_query(F.data.startswith("warehouse_all_products_page_"))
+async def warehouse_all_products_page_handler(callback: CallbackQuery, session: AsyncSession):
+    """Обработчик пагинации для страницы всех товаров"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    try:
+        # Получаем номер страницы из callback_data
+        page = int(callback.data.split("_")[-1])
+        
+        warehouse_service = WarehouseService(session)
+        products = await warehouse_service.get_available_products()
+        
+        if not products:
+            await callback.answer("❌ Товары не найдены", show_alert=True)
+            return
+        
+        # Проверяем валидность страницы (должно совпадать с warehouse_all_products_kb)
+        per_page = 5
+        max_page = (len(products) - 1) // per_page
+        if page < 0 or page > max_page:
+            await callback.answer("❌ Страница не найдена", show_alert=True)
+            return
+        
+        await callback.message.edit_reply_markup(
+            reply_markup=warehouse_all_products_kb(products, page)
+        )
+        await callback.answer()
+        
+    except (ValueError, IndexError) as e:
+        logger.error(f"Error in warehouse_all_products_page_handler: {e}")
+        await callback.answer("❌ Ошибка обработки страницы", show_alert=True)
 
 
 # ========== КОМПАКТНОЕ ОТОБРАЖЕНИЕ ТОВАРОВ ПО КАТЕГОРИЯМ ==========
@@ -2592,6 +2660,148 @@ async def mass_delete_category_callback(callback: CallbackQuery):
     """Заглушка для массового удаления товаров категории"""
     category_id = callback.data.split("_")[-1]
     await callback.answer("🚧 Функция массового удаления товаров в разработке!", show_alert=True)
+
+
+# ========== МЕНЮ УПРАВЛЕНИЯ КАТЕГОРИЯМИ ==========
+
+@warehouse_router.callback_query(F.data == "warehouse_categories_menu")
+async def warehouse_categories_menu_callback(callback: CallbackQuery, session: AsyncSession):
+    """Показать меню управления категориями"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    warehouse_service = WarehouseService(session)
+    categories = await warehouse_service.get_categories()
+    
+    # Считаем общую статистику
+    total_categories = len(categories)
+    total_products = 0
+    empty_categories = 0
+    
+    # Считаем товары по всем категориям и создаем словарь для клавиатуры
+    category_products_count = {}
+    for category in categories:
+        category_products = await warehouse_service.get_products_by_category(category.id)
+        category_products_count[category.id] = len(category_products) if category_products else 0
+        if category_products:
+            total_products += len(category_products)
+        else:
+            empty_categories += 1
+    
+    if not categories:
+        text = (
+            f"📂 <b>Управление категориями</b>\n\n"
+            f"❌ Категории не найдены.\n\n"
+            f"💡 Создайте первую категорию для организации товаров."
+        )
+    else:
+        text = (
+            f"📂 <b>Управление категориями</b>\n\n"
+            f"📊 <b>Общая статистика:</b>\n"
+            f"• Категорий: <b>{total_categories}</b>\n"
+            f"• Товаров: <b>{total_products}</b>\n"
+            f"• Пустых категорий: <b>{empty_categories}</b>\n\n"
+            f"💡 <b>Выберите категорию для управления:</b>"
+        )
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=warehouse_categories_management_kb(categories, category_products_count)
+    )
+    await callback.answer()
+
+
+@warehouse_router.callback_query(F.data.startswith("warehouse_manage_category_"))
+async def warehouse_manage_category_callback(callback: CallbackQuery, session: AsyncSession):
+    """Показать меню управления конкретной категорией"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    try:
+        category_id = int(callback.data.split("_")[-1])
+        warehouse_service = WarehouseService(session)
+        
+        # Получаем категорию
+        category = await warehouse_service.get_category_by_id(category_id)
+        if not category:
+            await callback.answer("❌ Категория не найдена", show_alert=True)
+            return
+        
+        # Получаем товары в категории
+        products = await warehouse_service.get_products_by_category(category_id)
+        
+        # Считаем статистику
+        total_products = len(products)
+        available_products = sum(1 for p in products if p.is_unlimited or p.stock_quantity > 0)
+        total_stock = sum(p.stock_quantity for p in products if not p.is_unlimited)
+        unlimited_count = sum(1 for p in products if p.is_unlimited)
+        
+        # Формируем отображение остатков
+        stock_display = ""
+        if unlimited_count > 0:
+            stock_display += f"∞x{unlimited_count}"
+        if total_stock > 0:
+            if stock_display:
+                stock_display += f" + {total_stock}"
+            else:
+                stock_display = str(total_stock)
+        if not stock_display:
+            stock_display = "0"
+        
+        text = (
+            f"📂 <b>Управление категорией</b>\n"
+            f"📁 <b>Название:</b> {category.name}\n\n"
+            f"📊 <b>Статистика:</b>\n"
+            f"• Всего товаров: <b>{total_products}</b>\n"
+            f"• Доступно: <b>{available_products}</b>\n"
+            f"• Остаток: <b>{stock_display}</b> шт.\n\n"
+        )
+        
+        if category.description:
+            text += f"📝 <b>Описание:</b>\n{category.description}\n\n"
+        
+        if category.manual_url:
+            text += f"🔗 <b>Инструкция:</b> {category.manual_url}\n\n"
+        
+        text += f"💡 <b>Выберите действие:</b>"
+        
+        await callback.message.edit_text(
+            text,
+            reply_markup=warehouse_category_management_kb(category_id)
+        )
+        await callback.answer()
+        
+    except (ValueError, IndexError) as e:
+        logger.error(f"Error in warehouse_manage_category_callback: {e}")
+        await callback.answer("❌ Ошибка обработки категории", show_alert=True)
+
+
+# ========== ЗАГЛУШКИ ДЛЯ СТАТИСТИКИ И МАССОВЫХ ОПЕРАЦИЙ ==========
+
+@warehouse_router.callback_query(F.data == "warehouse_categories_stats")
+async def warehouse_categories_stats_callback(callback: CallbackQuery):
+    """Заглушка для статистики категорий"""
+    await callback.answer("🚧 Детальная статистика категорий в разработке!", show_alert=True)
+
+
+@warehouse_router.callback_query(F.data == "warehouse_categories_bulk")
+async def warehouse_categories_bulk_callback(callback: CallbackQuery):
+    """Заглушка для массовых операций с категориями"""
+    await callback.answer("🚧 Массовые операции с категориями в разработке!", show_alert=True)
+
+
+@warehouse_router.callback_query(F.data.startswith("warehouse_category_stats_"))
+async def warehouse_category_stats_callback(callback: CallbackQuery):
+    """Заглушка для статистики конкретной категории"""
+    await callback.answer("🚧 Статистика категории в разработке!", show_alert=True)
+
+
+@warehouse_router.callback_query(F.data.startswith("warehouse_delete_category_"))
+async def warehouse_delete_category_callback(callback: CallbackQuery):
+    """Заглушка для удаления категории"""
+    await callback.answer("🚧 Удаление категорий в разработке!", show_alert=True)
 
 
 # Обработчик удален - не должен перехватывать все сообщения
