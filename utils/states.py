@@ -55,7 +55,7 @@ class WarehouseCreateCategoryStates(StatesGroup):
     waiting_for_name = State()
     waiting_for_description = State()
     waiting_for_confirmation = State()
-
+    waiting_for_manual_url = State() 
 
 class WarehouseMassAddStates(StatesGroup):
     """Состояния для массового добавления товаров"""

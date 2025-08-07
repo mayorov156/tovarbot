@@ -2433,22 +2433,57 @@ async def warehouse_product_detail_handler(callback: CallbackQuery, session: Asy
     
     try:
         # Парсим callback data: warehouse_product_detail_{product_id}_{category_id}_{page}
+        logger.info(f"Processing callback data: {callback.data}")
         parts = callback.data.split("_")
-        product_id = int(parts[3])
-        category_id = int(parts[4])
-        page = int(parts[5]) if len(parts) > 5 else 0
+        logger.info(f"Callback parts: {parts}")
+        
+        if len(parts) < 5:
+            raise ValueError(f"Invalid callback format: expected at least 5 parts, got {len(parts)}")
+        
+        # Проверяем, что это действительно числа
+        try:
+            product_id = int(parts[3])
+            category_id = int(parts[4])
+            page = int(parts[5]) if len(parts) > 5 else 0
+        except (ValueError, IndexError) as e:
+            raise ValueError(f"Invalid numeric values in callback: {parts[3:]}, error: {e}")
+        
+        # Проверяем валидность значений
+        if product_id <= 0:
+            raise ValueError(f"Invalid product_id: {product_id}")
+        if category_id <= 0:
+            raise ValueError(f"Invalid category_id: {category_id}")
+        if page < 0:
+            raise ValueError(f"Invalid page: {page}")
+        
+        logger.info(f"Parsed: product_id={product_id}, category_id={category_id}, page={page}")
+        
+        # Проверяем сессию базы данных
+        if not session:
+            raise Exception("Database session is None")
         
         warehouse_service = WarehouseService(session)
         
         # Получаем товар с категорией
-        product = await warehouse_service.get_product_with_category(product_id)
+        logger.info(f"Fetching product with ID: {product_id}")
+        try:
+            product = await warehouse_service.get_product_with_category(product_id)
+        except Exception as db_error:
+            logger.error(f"Database error while fetching product {product_id}: {db_error}")
+            raise Exception(f"Database error: {db_error}")
+        
         if not product:
+            logger.warning(f"Product not found: product_id={product_id}")
             await callback.message.edit_text(
-                "❌ <b>Товар не найден</b>\n\nВозможно, товар был удален.",
+                f"❌ <b>Товар не найден</b>\n\n"
+                f"Товар с ID #{product_id} не существует или был удален.\n"
+                f"Возможно, товар был удален другим администратором.",
                 reply_markup=back_to_warehouse_kb()
             )
             await callback.answer("❌ Товар не найден", show_alert=True)
             return
+        
+        logger.info(f"Product found: {product.name} (ID: {product.id})")
         
         # Получаем тип товара
         product_type_display = {
@@ -2474,11 +2509,11 @@ async def warehouse_product_detail_handler(callback: CallbackQuery, session: Asy
             status_icon = "🔴"
         
         # Формируем превью контента
-        if product.content:
-            if len(product.content) > 100:
-                content_preview = product.content[:100] + "..."
+        if product.digital_content:
+            if len(product.digital_content) > 100:
+                content_preview = product.digital_content[:100] + "..."
             else:
-                content_preview = product.content
+                content_preview = product.digital_content
         else:
             content_preview = "Не указано"
         
@@ -2504,9 +2539,27 @@ async def warehouse_product_detail_handler(callback: CallbackQuery, session: Asy
         
     except ValueError as e:
         logger.error(f"Error parsing callback_data in warehouse_product_detail_handler: {e}")
+        logger.error(f"Callback data: {callback.data}")
+        await callback.message.edit_text(
+            "❌ <b>Ошибка обработки данных</b>\n\n"
+            "Неверный формат данных товара.\n"
+            "Попробуйте выбрать товар снова.",
+            reply_markup=back_to_warehouse_kb()
+        )
         await callback.answer("❌ Ошибка обработки данных", show_alert=True)
     except Exception as e:
         logger.error(f"Error in warehouse_product_detail_handler: {e}")
+        logger.error(f"Callback data: {callback.data}")
+        logger.error(f"User ID: {callback.from_user.id}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        
+        await callback.message.edit_text(
+            "❌ <b>Ошибка при загрузке товара</b>\n\n"
+            "Произошла техническая ошибка.\n"
+            "Попробуйте еще раз или обратитесь к администратору.",
+            reply_markup=back_to_warehouse_kb()
+        )
         await callback.answer("❌ Произошла ошибка при загрузке товара", show_alert=True)
 
 
