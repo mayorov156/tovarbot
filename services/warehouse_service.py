@@ -3,7 +3,7 @@
 import logging
 from typing import Optional, List, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, or_
 from sqlalchemy.orm import selectinload
 
 from database.models import Product, Category, User, WarehouseLog, ProductType
@@ -147,8 +147,8 @@ class WarehouseService:
         return await self.product_repo.get_available_products()
     
     async def get_products_by_category(self, category_id: int) -> List[Product]:
-        """Получить все товары по категории"""
-        return await self.product_repo.get_active_products(category_id)
+        """Получить доступные товары по категории (только с остатками > 0 или безлимитные)"""
+        return await self.product_repo.get_available_products(category_id)
     
     async def get_categories(self) -> List[Category]:
         """Получить все активные категории"""
@@ -339,6 +339,56 @@ class WarehouseService:
         
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
+    
+    async def get_all_products(self) -> List[Product]:
+        """Получить все активные товары с категориями"""
+        stmt = (
+            select(Product)
+            .options(selectinload(Product.category))
+            .where(Product.is_active == True)
+            .order_by(Product.name)
+        )
+        
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+    
+    async def get_products_with_stock(self) -> List[Product]:
+        """Получить все товары с остатками (включая безлимитные)"""
+        stmt = (
+            select(Product)
+            .options(selectinload(Product.category))
+            .where(
+                and_(
+                    Product.is_active == True,
+                    or_(
+                        Product.is_unlimited == True,
+                        Product.stock_quantity > 0
+                    )
+                )
+            )
+            .order_by(Product.name)
+        )
+        
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+    
+    async def get_products_out_of_stock(self) -> List[Product]:
+        """Получить все товары без остатков (не безлимитные и с остатками = 0)"""
+        stmt = (
+            select(Product)
+            .options(selectinload(Product.category))
+            .where(
+                and_(
+                    Product.is_active == True,
+                    Product.is_unlimited == False,
+                    Product.stock_quantity <= 0
+                )
+            )
+            .order_by(Product.name)
+        )
+        
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
     
     async def create_category(
         self,
@@ -754,17 +804,21 @@ class WarehouseService:
             return None
     
     async def get_category_stats(self) -> List[dict]:
-        """Получить статистику товаров по категориям с анализом дубликатов"""
+        """Получить статистику ДОСТУПНЫХ товаров по категориям (только с остатками > 0 или безлимитные)"""
         from sqlalchemy import func
         try:
-            # Получаем все категории с подсчетом товаров
+            # Получаем все категории с подсчетом ДОСТУПНЫХ товаров (с остатками > 0 или безлимитные)
             stmt = select(
                 Category.id,
                 Category.name,
                 select(func.count(Product.id)).where(
                     and_(
                         Product.category_id == Category.id,
-                        Product.is_active == True
+                        Product.is_active == True,
+                        or_(
+                            Product.is_unlimited == True,
+                            Product.stock_quantity > 0
+                        )
                     )
                 ).label('total_products'),
                 select(func.sum(Product.stock_quantity)).where(
@@ -808,6 +862,63 @@ class WarehouseService:
         except Exception as e:
             logger.error(f"Error getting category stats: {e}")
             return []
+    
+    async def get_single_category_stats(self, category_id: int) -> Optional[dict]:
+        """Получить статистику для одной конкретной категории в реальном времени"""
+        from sqlalchemy import func
+        try:
+            # Получаем категорию
+            category = await self.get_category_by_id(category_id)
+            if not category:
+                return None
+            
+            # Получаем количество доступных товаров
+            available_products_stmt = select(func.count(Product.id)).where(
+                and_(
+                    Product.category_id == category_id,
+                    Product.is_active == True,
+                    or_(
+                        Product.is_unlimited == True,
+                        Product.stock_quantity > 0
+                    )
+                )
+            )
+            available_result = await self.session.execute(available_products_stmt)
+            available_count = available_result.scalar() or 0
+            
+            # Получаем общий остаток (только для товаров с ограниченным количеством)
+            total_stock_stmt = select(func.sum(Product.stock_quantity)).where(
+                and_(
+                    Product.category_id == category_id,
+                    Product.is_active == True,
+                    Product.is_unlimited == False
+                )
+            )
+            stock_result = await self.session.execute(total_stock_stmt)
+            total_stock = stock_result.scalar() or 0
+            
+            # Получаем количество безлимитных товаров
+            unlimited_stmt = select(func.count(Product.id)).where(
+                and_(
+                    Product.category_id == category_id,
+                    Product.is_active == True,
+                    Product.is_unlimited == True
+                )
+            )
+            unlimited_result = await self.session.execute(unlimited_stmt)
+            unlimited_count = unlimited_result.scalar() or 0
+            
+            return {
+                'id': category.id,
+                'name': category.name,
+                'total_products': available_count,
+                'total_stock': total_stock,
+                'unlimited_products': unlimited_count
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting single category stats for category {category_id}: {e}")
+            return None
 
     async def _analyze_category_duplicates(self, category_id: int) -> dict:
         """Анализировать дубликаты товаров в категории по названиям"""

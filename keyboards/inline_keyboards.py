@@ -56,9 +56,12 @@ def products_kb(products: List[Product], category_id: int, page: int = 0, per_pa
         # Показываем доступность товара
         availability = "✅" if (product.is_unlimited or product.stock_quantity > 0) else "❌"
         
+        # Обрезаем длинные названия товаров
+        display_name = product.name[:25] + "..." if len(product.name) > 25 else product.name
+        
         builder.row(
             InlineKeyboardButton(
-                text=f"{availability} {product.name} - {product.price:.2f}₽",
+                text=f"{availability} {display_name} - {product.price:.2f}₽",
                 callback_data=f"product_{product.id}"
             )
         )
@@ -352,9 +355,12 @@ def warehouse_products_kb(products: List[Product], page: int = 0, per_page: int 
             
         status = "🟢" if (product.is_unlimited or product.stock_quantity > 0) else "🔴"
         
+        # Обрезаем длинные названия товаров
+        display_name = product.name[:25] + "..." if len(product.name) > 25 else product.name
+        
         builder.row(
             InlineKeyboardButton(
-                text=f"{status} {product.name} ({stock_info}) - {product.price:.2f}₽",
+                text=f"{status} {display_name} ({stock_info}) - {product.price:.2f}₽",
                 callback_data=f"warehouse_product_{product.id}"
             )
         )
