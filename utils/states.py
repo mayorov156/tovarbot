@@ -54,7 +54,6 @@ class WarehouseCreateCategoryStates(StatesGroup):
     """Состояния для создания категории"""
     waiting_for_name = State()
     waiting_for_description = State()
-    waiting_for_manual_url = State()
     waiting_for_confirmation = State()
 
 

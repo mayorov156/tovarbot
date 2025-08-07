@@ -192,6 +192,12 @@ def warehouse_main_menu_kb() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="📦 Все товары", callback_data="warehouse_all_products")
     )
     
+    # Управление остатками
+    builder.row(
+        InlineKeyboardButton(text="🟢 Товары с остатками", callback_data="warehouse_products_with_stock"),
+        InlineKeyboardButton(text="🔴 Товары без остатков", callback_data="warehouse_show_out_of_stock")
+    )
+    
     # Быстрые действия управления
     builder.row(
         InlineKeyboardButton(text="📥 Добавить/Импорт", callback_data="warehouse_add_menu"),
@@ -280,7 +286,7 @@ def warehouse_main_categories_kb(category_stats: List[dict]) -> InlineKeyboardMa
             elif category['unlimited_products'] > 0 or category['total_stock'] > 0:
                 icon = "📂"  # Категория с товарами
             else:
-                icon = "📁"  # Категория без остатков
+                icon = "🔴"  # Категория без остатков
             
             button_text = f"{icon} {category['name']} ({category['total_products']} товаров, {stock_info} шт.)"
             
@@ -290,6 +296,12 @@ def warehouse_main_categories_kb(category_stats: List[dict]) -> InlineKeyboardMa
                     callback_data=f"warehouse_show_category_{category['id']}"
                 )
             )
+    
+    # Управление остатками
+    builder.row(
+        InlineKeyboardButton(text="🟢 Товары с остатками", callback_data="warehouse_products_with_stock"),
+        InlineKeyboardButton(text="🔴 Товары без остатков", callback_data="warehouse_show_out_of_stock")
+    )
     
     # Быстрые действия внизу
     builder.row(
@@ -585,7 +597,7 @@ def warehouse_categories_compact_kb(category_stats: List[dict]) -> InlineKeyboar
         elif category['unlimited_products'] > 0 or category['total_stock'] > 0:
             icon = "📂"  # Категория с товарами в наличии
         else:
-            icon = "📁"  # Категория без остатков
+            icon = "🔴"  # Категория без остатков
         
         button_text = f"{icon} {category['name']} ({category['total_products']} товаров, {stock_info} шт.)"
         
@@ -595,6 +607,12 @@ def warehouse_categories_compact_kb(category_stats: List[dict]) -> InlineKeyboar
                 callback_data=f"warehouse_show_category_{category['id']}"
             )
         )
+    
+    # Управление остатками
+    builder.row(
+        InlineKeyboardButton(text="🟢 Товары с остатками", callback_data="warehouse_products_with_stock"),
+        InlineKeyboardButton(text="🔴 Товары без остатков", callback_data="warehouse_show_out_of_stock")
+    )
     
     # Быстрые действия
     builder.row(
@@ -747,9 +765,9 @@ def warehouse_product_detail_kb(product_id: int, category_id: int, page: int = 0
         InlineKeyboardButton(text="➕ Добавить похожий", callback_data=f"warehouse_add_to_category_{category_id}"),
     )
     
-    # Навигация с иерархической структурой
+    # Навигация с иерархической структурой - возврат к единому управлению
     builder.row(
-        InlineKeyboardButton(text="🔙 К товарам категории", callback_data=f"warehouse_show_category_{category_id}_{page}"),
+        InlineKeyboardButton(text="🎛 Управление категорией", callback_data=f"warehouse_category_management_{category_id}_{page}"),
         InlineKeyboardButton(text="📂 Все товары", callback_data="warehouse_all_products")
     )
     
@@ -887,6 +905,584 @@ def warehouse_category_management_kb(category_id: int) -> InlineKeyboardMarkup:
     builder.row(
         InlineKeyboardButton(text="📂 К категориям", callback_data="warehouse_categories_menu"),
         InlineKeyboardButton(text="🏪 К складу", callback_data="warehouse_menu")
+    )
+    
+    return builder.as_markup()
+
+
+def warehouse_category_unified_management_kb(
+    products: List[Product], 
+    category_id: int, 
+    category_name: str, 
+    page: int = 0, 
+    per_page: int = 10
+) -> InlineKeyboardMarkup:
+    """Единое меню управления категорией - включает товары, статистику и все действия"""
+    builder = InlineKeyboardBuilder()
+    
+    # Пагинация товаров
+    start = page * per_page
+    end = start + per_page
+    page_products = products[start:end]
+    
+    if products:
+        # Показываем товары компактно с действиями
+        for product in page_products:
+            # Определяем статус товара
+            if product.is_unlimited:
+                stock_info = "∞"
+                status = "🟢"
+            else:
+                stock_info = f"{product.stock_quantity}"
+                status = "🟢" if product.stock_quantity > 0 else "🔴"
+            
+            # Компактная информация о товаре
+            product_name = product.name[:20] + "..." if len(product.name) > 20 else product.name
+            button_text = f"{status} {product_name} • {stock_info} • {product.price:.0f}₽"
+            
+            builder.row(
+                InlineKeyboardButton(
+                    text=button_text,
+                    callback_data=f"warehouse_product_detail_{product.id}_{category_id}_{page}"
+                )
+            )
+        
+        # Кнопки пагинации товаров
+        nav_buttons = []
+        if page > 0:
+            nav_buttons.append(
+                InlineKeyboardButton(text="⬅️", callback_data=f"warehouse_category_management_{category_id}_{page-1}")
+            )
+        if end < len(products):
+            nav_buttons.append(
+                InlineKeyboardButton(text="➡️", callback_data=f"warehouse_category_management_{category_id}_{page+1}")
+            )
+        
+        if nav_buttons:
+            builder.row(*nav_buttons)
+            
+        # Разделитель
+        builder.row(
+            InlineKeyboardButton(text="━━━━━ ДЕЙСТВИЯ С ТОВАРАМИ ━━━━━", callback_data="noop")
+        )
+    
+    # Действия с товарами в категории
+    builder.row(
+        InlineKeyboardButton(text="➕ Добавить товар", callback_data=f"warehouse_add_to_category_{category_id}"),
+        InlineKeyboardButton(text="📦 Массово добавить", callback_data=f"warehouse_mass_add_to_category_{category_id}")
+    )
+    
+    if products:  # Если есть товары
+        builder.row(
+            InlineKeyboardButton(text="⚡ Быстрое добавление", callback_data=f"warehouse_quick_add_to_category_{category_id}"),
+            InlineKeyboardButton(text="🎯 Выдать товар", callback_data="warehouse_quick_give")
+        )
+        builder.row(
+            InlineKeyboardButton(text="🗑 Массово удалить", callback_data=f"warehouse_mass_delete_category_{category_id}"),
+            InlineKeyboardButton(text="📊 Статистика товаров", callback_data=f"warehouse_category_products_stats_{category_id}")
+        )
+    
+    # Разделитель  
+    builder.row(
+        InlineKeyboardButton(text="━━━━━ УПРАВЛЕНИЕ КАТЕГОРИЕЙ ━━━━━", callback_data="noop")
+    )
+    
+    # Действия с самой категорией
+    builder.row(
+        InlineKeyboardButton(text="📝 Редактировать категорию", callback_data=f"warehouse_edit_category_{category_id}"),
+        InlineKeyboardButton(text="📊 Статистика категории", callback_data=f"warehouse_category_stats_{category_id}")
+    )
+    
+    builder.row(
+        InlineKeyboardButton(text="🔄 Обновить", callback_data=f"warehouse_category_management_{category_id}_{page}"),
+        InlineKeyboardButton(text="🗑 Удалить категорию", callback_data=f"warehouse_delete_category_{category_id}")
+    )
+    
+    # Навигация
+    builder.row(
+        InlineKeyboardButton(text="📂 К категориям", callback_data="warehouse_categories_menu"),
+        InlineKeyboardButton(text="🏪 Главное меню", callback_data="warehouse_menu")
+    )
+    
+    return builder.as_markup()
+
+
+def warehouse_category_action_complete_kb(category_id: int, page: int = 0, action_type: str = "action") -> InlineKeyboardMarkup:
+    """Клавиатура возврата после действий с товарами в категории - возврат к единому управлению"""
+    builder = InlineKeyboardBuilder()
+    
+    # Действие зависит от типа операции
+    if action_type == "add":
+        builder.row(
+            InlineKeyboardButton(text="➕ Добавить еще", callback_data=f"warehouse_add_to_category_{category_id}"),
+            InlineKeyboardButton(text="📦 Массово добавить", callback_data=f"warehouse_mass_add_to_category_{category_id}")
+        )
+    elif action_type == "edit":
+        builder.row(
+            InlineKeyboardButton(text="📝 Редактировать еще", callback_data=f"warehouse_add_to_category_{category_id}"),
+            InlineKeyboardButton(text="➕ Добавить товар", callback_data=f"warehouse_add_to_category_{category_id}")
+        )
+    elif action_type == "delete":
+        builder.row(
+            InlineKeyboardButton(text="🗑 Удалить еще", callback_data=f"warehouse_mass_delete_category_{category_id}"),
+            InlineKeyboardButton(text="➕ Добавить товар", callback_data=f"warehouse_add_to_category_{category_id}")
+        )
+    elif action_type == "give":
+        builder.row(
+            InlineKeyboardButton(text="🎯 Выдать еще", callback_data="warehouse_quick_give"),
+            InlineKeyboardButton(text="📊 Статистика", callback_data=f"warehouse_category_stats_{category_id}")
+        )
+    else:
+        # Общие действия
+        builder.row(
+            InlineKeyboardButton(text="➕ Добавить товар", callback_data=f"warehouse_add_to_category_{category_id}"),
+            InlineKeyboardButton(text="📦 Массово добавить", callback_data=f"warehouse_mass_add_to_category_{category_id}")
+        )
+    
+    # Главные кнопки навигации - всегда возврат к единому управлению
+    builder.row(
+        InlineKeyboardButton(text="🎛 Управление категорией", callback_data=f"warehouse_category_management_{category_id}_{page}"),
+        InlineKeyboardButton(text="🔄 Обновить", callback_data=f"warehouse_category_management_{category_id}_{page}")
+    )
+    
+    # Дополнительная навигация
+    builder.row(
+        InlineKeyboardButton(text="📂 К категориям", callback_data="warehouse_categories_menu"),
+        InlineKeyboardButton(text="🏪 Главное меню", callback_data="warehouse_menu")
+    )
+    
+    return builder.as_markup()
+
+
+def warehouse_products_with_stock_kb(products: List[Product], page: int = 0, per_page: int = 10, category_id: Optional[int] = None) -> InlineKeyboardMarkup:
+    """Клавиатура товаров с остатками и пагинацией"""
+    builder = InlineKeyboardBuilder()
+    
+    # Фильтруем товары с остатками
+    available_products = [p for p in products if p.is_unlimited or p.stock_quantity > 0]
+    out_of_stock_products = [p for p in products if not p.is_unlimited and p.stock_quantity <= 0]
+    
+    # Пагинация для доступных товаров
+    start = page * per_page
+    end = start + per_page
+    page_products = available_products[start:end]
+    
+    # Показываем доступные товары
+    for product in page_products:
+        if product.is_unlimited:
+            stock_info = "∞"
+            status = "🟢"
+        else:
+            stock_info = f"{product.stock_quantity}"
+            status = "🟢"
+        
+        button_text = f"{status} {product.name} • {stock_info} шт • {product.price:.0f}₽"
+        
+        builder.row(
+            InlineKeyboardButton(
+                text=button_text,
+                callback_data=f"warehouse_select_product_{product.id}"
+            )
+        )
+    
+    # Показываем товары без остатков (если есть)
+    if out_of_stock_products and page == 0:  # Только на первой странице
+        builder.row(
+            InlineKeyboardButton(text="━━━━━ ЗАКОНЧИЛСЯ ━━━━━", callback_data="noop")
+        )
+        
+        for product in out_of_stock_products[:3]:  # Показываем только первые 3
+            button_text = f"🔴 {product.name} • ЗАКОНЧИЛСЯ • {product.price:.0f}₽"
+            
+            builder.row(
+                InlineKeyboardButton(
+                    text=button_text,
+                    callback_data=f"warehouse_product_out_of_stock_{product.id}"
+                )
+            )
+        
+        if len(out_of_stock_products) > 3:
+            builder.row(
+                InlineKeyboardButton(
+                    text=f"🔴 И еще {len(out_of_stock_products) - 3} товаров закончилось",
+                    callback_data="warehouse_show_out_of_stock"
+                )
+            )
+    
+    # Кнопки пагинации
+    nav_buttons = []
+    
+    if page > 0:
+        nav_buttons.append(
+            InlineKeyboardButton(text="⬅️", callback_data=f"warehouse_products_stock_page_{page-1}")
+        )
+    
+    # Показываем информацию о страницах
+    total_pages = (len(available_products) + per_page - 1) // per_page
+    if total_pages > 1:
+        nav_buttons.append(
+            InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="noop")
+        )
+    
+    if end < len(available_products):
+        nav_buttons.append(
+            InlineKeyboardButton(text="➡️", callback_data=f"warehouse_products_stock_page_{page+1}")
+        )
+    
+    if nav_buttons:
+        builder.row(*nav_buttons)
+    
+    # Информация о товарах
+    builder.row(
+        InlineKeyboardButton(
+            text=f"📦 Доступно: {len(available_products)} | 🔴 Закончилось: {len(out_of_stock_products)}",
+            callback_data="noop"
+        )
+    )
+    
+    # Кнопки действий
+    builder.row(
+        InlineKeyboardButton(text="🔄 Обновить", callback_data="warehouse_products_with_stock"),
+        InlineKeyboardButton(text="📦 Добавить товар", callback_data="warehouse_add_product")
+    )
+    
+    if category_id:
+        builder.row(
+            InlineKeyboardButton(text="📂 К категории", callback_data=f"warehouse_show_category_{category_id}"),
+            InlineKeyboardButton(text="🔙 К складу", callback_data="warehouse_menu")
+        )
+    else:
+        builder.row(
+            InlineKeyboardButton(text="🔙 К складу", callback_data="warehouse_menu")
+        )
+    
+    return builder.as_markup()
+
+
+def warehouse_category_products_with_stock_kb(
+    products: List[Product], 
+    category_id: int, 
+    category_name: str, 
+    page: int = 0, 
+    per_page: int = 10
+) -> InlineKeyboardMarkup:
+    """Клавиатура товаров категории с остатками"""
+    builder = InlineKeyboardBuilder()
+    
+    # Фильтруем товары
+    available_products = [p for p in products if p.is_unlimited or p.stock_quantity > 0]
+    out_of_stock_products = [p for p in products if not p.is_unlimited and p.stock_quantity <= 0]
+    
+    # Пагинация для доступных товаров
+    start = page * per_page
+    end = start + per_page
+    page_products = available_products[start:end]
+    
+    # Заголовок категории
+    builder.row(
+        InlineKeyboardButton(
+            text=f"📂 {category_name} • {len(available_products)} доступно • {len(out_of_stock_products)} закончилось",
+            callback_data="noop"
+        )
+    )
+    
+    # Показываем доступные товары
+    for product in page_products:
+        if product.is_unlimited:
+            stock_info = "∞"
+            status = "🟢"
+        else:
+            stock_info = f"{product.stock_quantity}"
+            status = "🟢"
+        
+        # Компактное отображение
+        product_name = product.name[:25] + "..." if len(product.name) > 25 else product.name
+        button_text = f"{status} {product_name} • {stock_info} • {product.price:.0f}₽"
+        
+        builder.row(
+            InlineKeyboardButton(
+                text=button_text,
+                callback_data=f"warehouse_product_detail_{product.id}_{category_id}_{page}"
+            )
+        )
+    
+    # Показываем товары без остатков (если есть и на первой странице)
+    if out_of_stock_products and page == 0:
+        builder.row(
+            InlineKeyboardButton(text="━━━━━ ЗАКОНЧИЛСЯ ━━━━━", callback_data="noop")
+        )
+        
+        for product in out_of_stock_products[:2]:  # Показываем только первые 2
+            product_name = product.name[:20] + "..." if len(product.name) > 20 else product.name
+            button_text = f"🔴 {product_name} • ЗАКОНЧИЛСЯ • {product.price:.0f}₽"
+            
+            builder.row(
+                InlineKeyboardButton(
+                    text=button_text,
+                    callback_data=f"warehouse_product_out_of_stock_{product.id}"
+                )
+            )
+        
+        if len(out_of_stock_products) > 2:
+            builder.row(
+                InlineKeyboardButton(
+                    text=f"🔴 И еще {len(out_of_stock_products) - 2} товаров закончилось",
+                    callback_data=f"warehouse_show_category_out_of_stock_{category_id}"
+                )
+            )
+    
+    # Кнопки пагинации
+    nav_buttons = []
+    
+    if page > 0:
+        nav_buttons.append(
+            InlineKeyboardButton(text="⬅️", callback_data=f"warehouse_category_stock_page_{category_id}_{page-1}")
+        )
+    
+    # Показываем информацию о страницах
+    total_pages = (len(available_products) + per_page - 1) // per_page
+    if total_pages > 1:
+        nav_buttons.append(
+            InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="noop")
+        )
+    
+    if end < len(available_products):
+        nav_buttons.append(
+            InlineKeyboardButton(text="➡️", callback_data=f"warehouse_category_stock_page_{category_id}_{page+1}")
+        )
+    
+    if nav_buttons:
+        builder.row(*nav_buttons)
+    
+    # Быстрые действия для категории
+    builder.row(
+        InlineKeyboardButton(text="📥 Добавить в категорию", callback_data=f"warehouse_add_to_category_{category_id}"),
+        InlineKeyboardButton(text="📦 Массово добавить", callback_data=f"warehouse_mass_add_to_category_{category_id}")
+    )
+    
+    builder.row(
+        InlineKeyboardButton(text="⚡ Быстро добавить", callback_data=f"warehouse_quick_add_to_category_{category_id}"),
+        InlineKeyboardButton(text="🎯 Выдать товар", callback_data="warehouse_quick_give")
+    )
+    
+    # Кнопки навигации
+    builder.row(
+        InlineKeyboardButton(text="🔄 Обновить", callback_data=f"warehouse_category_products_with_stock_{category_id}_0"),
+        InlineKeyboardButton(text="📂 К категориям", callback_data="warehouse_categories_menu")
+    )
+    
+    return builder.as_markup()
+
+
+def warehouse_out_of_stock_products_kb(products: List[Product], page: int = 0, per_page: int = 10, category_id: Optional[int] = None) -> InlineKeyboardMarkup:
+    """Клавиатура товаров без остатков"""
+    builder = InlineKeyboardBuilder()
+    
+    # Фильтруем только товары без остатков
+    out_of_stock_products = [p for p in products if not p.is_unlimited and p.stock_quantity <= 0]
+    
+    # Пагинация
+    start = page * per_page
+    end = start + per_page
+    page_products = out_of_stock_products[start:end]
+    
+    builder.row(
+        InlineKeyboardButton(
+            text=f"🔴 Товары без остатков ({len(out_of_stock_products)} шт.)",
+            callback_data="noop"
+        )
+    )
+    
+    # Показываем товары без остатков
+    for product in page_products:
+        product_name = product.name[:30] + "..." if len(product.name) > 30 else product.name
+        button_text = f"🔴 {product_name} • {product.price:.0f}₽"
+        
+        builder.row(
+            InlineKeyboardButton(
+                text=button_text,
+                callback_data=f"warehouse_product_out_of_stock_{product.id}"
+            )
+        )
+    
+    # Кнопки пагинации
+    nav_buttons = []
+    
+    if page > 0:
+        nav_buttons.append(
+            InlineKeyboardButton(text="⬅️", callback_data=f"warehouse_out_of_stock_page_{page-1}")
+        )
+    
+    # Показываем информацию о страницах
+    total_pages = (len(out_of_stock_products) + per_page - 1) // per_page
+    if total_pages > 1:
+        nav_buttons.append(
+            InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="noop")
+        )
+    
+    if end < len(out_of_stock_products):
+        nav_buttons.append(
+            InlineKeyboardButton(text="➡️", callback_data=f"warehouse_out_of_stock_page_{page+1}")
+        )
+    
+    if nav_buttons:
+        builder.row(*nav_buttons)
+    
+    # Кнопки действий
+    builder.row(
+        InlineKeyboardButton(text="📦 Добавить остатки", callback_data="warehouse_add_stock"),
+        InlineKeyboardButton(text="🔄 Обновить", callback_data="warehouse_show_out_of_stock")
+    )
+    
+    if category_id:
+        builder.row(
+            InlineKeyboardButton(text="📂 К категории", callback_data=f"warehouse_show_category_{category_id}"),
+            InlineKeyboardButton(text="🔙 К складу", callback_data="warehouse_menu")
+        )
+    else:
+        builder.row(
+            InlineKeyboardButton(text="🔙 К складу", callback_data="warehouse_menu")
+        )
+    
+    return builder.as_markup()
+
+
+def warehouse_stock_summary_kb(categories: List[dict]) -> InlineKeyboardMarkup:
+    """Клавиатура сводки по остаткам по категориям"""
+    builder = InlineKeyboardBuilder()
+    
+    builder.row(
+        InlineKeyboardButton(
+            text="📊 Сводка по остаткам",
+            callback_data="noop"
+        )
+    )
+    
+    # Показываем категории с информацией об остатках
+    for category in categories:
+        available_count = category.get('available_products', 0)
+        out_of_stock_count = category.get('out_of_stock_products', 0)
+        total_stock = category.get('total_stock', 0)
+        
+        # Определяем статус категории
+        if available_count > 0:
+            status = "🟢"
+        elif out_of_stock_count > 0:
+            status = "🔴"
+        else:
+            status = "⚪"
+        
+        button_text = f"{status} {category['name']} • {available_count} доступно • {out_of_stock_count} закончилось"
+        
+        builder.row(
+            InlineKeyboardButton(
+                text=button_text,
+                callback_data=f"warehouse_category_stock_summary_{category['id']}"
+            )
+        )
+    
+    # Общая статистика
+    total_available = sum(cat.get('available_products', 0) for cat in categories)
+    total_out_of_stock = sum(cat.get('out_of_stock_products', 0) for cat in categories)
+    
+    builder.row(
+        InlineKeyboardButton(
+            text=f"📦 Всего доступно: {total_available} | 🔴 Закончилось: {total_out_of_stock}",
+            callback_data="noop"
+        )
+    )
+    
+    # Кнопки действий
+    builder.row(
+        InlineKeyboardButton(text="📦 Добавить остатки", callback_data="warehouse_add_stock"),
+        InlineKeyboardButton(text="🔴 Показать закончившиеся", callback_data="warehouse_show_out_of_stock")
+    )
+    
+    builder.row(
+        InlineKeyboardButton(text="🔄 Обновить", callback_data="warehouse_stock_summary"),
+        InlineKeyboardButton(text="🔙 К складу", callback_data="warehouse_menu")
+    )
+    
+    return builder.as_markup()
+
+
+def warehouse_quick_stock_select_kb(products: List[Product], action: str = "give") -> InlineKeyboardMarkup:
+    """Быстрая клавиатура выбора товаров с остатками для выдачи"""
+    builder = InlineKeyboardBuilder()
+    
+    # Фильтруем только товары с остатками
+    available_products = [p for p in products if p.is_unlimited or p.stock_quantity > 0]
+    
+    builder.row(
+        InlineKeyboardButton(
+            text=f"🎯 Выберите товар для выдачи ({len(available_products)} доступно)",
+            callback_data="noop"
+        )
+    )
+    
+    # Показываем товары с остатками
+    for product in available_products[:10]:  # Ограничиваем 10 товарами
+        if product.is_unlimited:
+            stock_info = "∞"
+        else:
+            stock_info = f"{product.stock_quantity}"
+        
+        product_name = product.name[:25] + "..." if len(product.name) > 25 else product.name
+        button_text = f"🟢 {product_name} • {stock_info} • {product.price:.0f}₽"
+        
+        builder.row(
+            InlineKeyboardButton(
+                text=button_text,
+                callback_data=f"warehouse_quick_{action}_{product.id}"
+            )
+        )
+    
+    if len(available_products) > 10:
+        builder.row(
+            InlineKeyboardButton(
+                text=f"📄 Показать еще {len(available_products) - 10} товаров",
+                callback_data="warehouse_show_more_products"
+            )
+        )
+    
+    # Кнопки действий
+    builder.row(
+        InlineKeyboardButton(text="🔍 Поиск товара", callback_data="warehouse_search_product"),
+        InlineKeyboardButton(text="📂 По категориям", callback_data="warehouse_categories_menu")
+    )
+    
+    builder.row(
+        InlineKeyboardButton(text="🔙 Отмена", callback_data="warehouse_menu")
+    )
+    
+    return builder.as_markup()
+
+
+def warehouse_stock_management_kb() -> InlineKeyboardMarkup:
+    """Клавиатура управления остатками"""
+    builder = InlineKeyboardBuilder()
+    
+    builder.row(
+        InlineKeyboardButton(text="📊 Сводка по остаткам", callback_data="warehouse_stock_summary")
+    )
+    
+    builder.row(
+        InlineKeyboardButton(text="🟢 Товары с остатками", callback_data="warehouse_products_with_stock"),
+        InlineKeyboardButton(text="🔴 Товары без остатков", callback_data="warehouse_show_out_of_stock")
+    )
+    
+    builder.row(
+        InlineKeyboardButton(text="📦 Добавить остатки", callback_data="warehouse_add_stock"),
+        InlineKeyboardButton(text="📋 Импорт остатков", callback_data="warehouse_import_stock")
+    )
+    
+    builder.row(
+        InlineKeyboardButton(text="⚙️ Настройки уведомлений", callback_data="warehouse_stock_notifications"),
+        InlineKeyboardButton(text="📈 Статистика продаж", callback_data="warehouse_sales_stats")
+    )
+    
+    builder.row(
+        InlineKeyboardButton(text="🔙 К складу", callback_data="warehouse_menu")
     )
     
     return builder.as_markup()

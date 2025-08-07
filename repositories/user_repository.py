@@ -131,3 +131,157 @@ class UserRepository(BaseRepository[User]):
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+    
+    async def get_by_promo_code(self, promo_code: str) -> Optional[User]:
+        """Получить пользователя по промокоду"""
+        stmt = select(User).where(User.promo_code == promo_code)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+    
+    async def get_user_orders(self, user_id: int) -> List:
+        """Получить заказы пользователя"""
+        from database.models import Order
+        
+        stmt = (
+            select(Order)
+            .options(selectinload(Order.product))
+            .where(Order.user_id == user_id)
+            .order_by(Order.created_at.desc())
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+    
+    async def search_users_flexible(self, query: str, limit: int = 10) -> List[User]:
+        """Гибкий поиск пользователей по различным параметрам"""
+        users = []
+        
+        # Поиск по username (частичное совпадение)
+        username_users = await self.search_users_by_username(query)
+        users.extend(username_users)
+        
+        # Поиск по реферальному коду
+        if len(query) >= 6:  # Минимальная длина реферального кода
+            referral_user = await self.get_by_referral_code(query)
+            if referral_user and referral_user not in users:
+                users.append(referral_user)
+        
+        # Поиск по промокоду
+        if query.startswith('PROMO'):
+            promo_user = await self.get_by_promo_code(query)
+            if promo_user and promo_user not in users:
+                users.append(promo_user)
+        
+        # Пробуем найти по ID (если это число)
+        try:
+            user_id = int(query)
+            id_user = await self.get_by_telegram_id(user_id)
+            if id_user and id_user not in users:
+                users.append(id_user)
+        except ValueError:
+            pass
+        
+        return users[:limit]
+    
+    async def get_user_statistics(self, user_id: int) -> dict:
+        """Получить статистику пользователя"""
+        from database.models import Order
+        
+        # Общая статистика заказов
+        total_orders = await self.session.scalar(
+            select(func.count(Order.id)).where(Order.user_id == user_id)
+        ) or 0
+        
+        # Статистика по статусам
+        pending_orders = await self.session.scalar(
+            select(func.count(Order.id))
+            .where(Order.user_id == user_id, Order.status == 'pending')
+        ) or 0
+        
+        paid_orders = await self.session.scalar(
+            select(func.count(Order.id))
+            .where(Order.user_id == user_id, Order.status == 'paid')
+        ) or 0
+        
+        delivered_orders = await self.session.scalar(
+            select(func.count(Order.id))
+            .where(Order.user_id == user_id, Order.status == 'delivered')
+        ) or 0
+        
+        cancelled_orders = await self.session.scalar(
+            select(func.count(Order.id))
+            .where(Order.user_id == user_id, Order.status == 'cancelled')
+        ) or 0
+        
+        # Общая сумма потраченная
+        total_spent = await self.session.scalar(
+            select(func.sum(Order.total_price))
+            .where(Order.user_id == user_id, Order.status.in_(['paid', 'delivered']))
+        ) or 0
+        
+        return {
+            "total_orders": total_orders,
+            "pending_orders": pending_orders,
+            "paid_orders": paid_orders,
+            "delivered_orders": delivered_orders,
+            "cancelled_orders": cancelled_orders,
+            "total_spent": total_spent
+        }
+    
+    async def get_recent_user_orders(self, user_id: int, limit: int = 5) -> List:
+        """Получить последние заказы пользователя"""
+        from database.models import Order
+        
+        stmt = (
+            select(Order)
+            .options(selectinload(Order.product))
+            .where(Order.user_id == user_id)
+            .order_by(Order.created_at.desc())
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+    
+    async def get_users_by_activity_level(self, level: str, limit: int = 10) -> List[User]:
+        """Получить пользователей по уровню активности"""
+        if level == "new":
+            stmt = (
+                select(User)
+                .where(User.total_orders == 0)
+                .order_by(User.created_at.desc())
+                .limit(limit)
+            )
+        elif level == "occasional":
+            stmt = (
+                select(User)
+                .where(User.total_orders.between(1, 2))
+                .order_by(User.total_orders.desc())
+                .limit(limit)
+            )
+        elif level == "regular":
+            stmt = (
+                select(User)
+                .where(User.total_orders.between(3, 5))
+                .order_by(User.total_orders.desc())
+                .limit(limit)
+            )
+        elif level == "active":
+            stmt = (
+                select(User)
+                .where(User.total_orders.between(6, 10))
+                .order_by(User.total_orders.desc())
+                .limit(limit)
+            )
+        elif level == "vip":
+            stmt = (
+                select(User)
+                .where(
+                    (User.total_orders > 10) | (User.total_spent > 1000)
+                )
+                .order_by(User.total_spent.desc())
+                .limit(limit)
+            )
+        else:
+            return []
+        
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())

@@ -21,7 +21,10 @@ from keyboards.warehouse_keyboards import (
     warehouse_categories_compact_kb, warehouse_category_products_kb, warehouse_give_menu_kb,
     warehouse_main_categories_kb, warehouse_product_detail_kb, warehouse_product_action_complete_kb,
     warehouse_display_settings_kb, warehouse_error_recovery_kb, warehouse_categories_management_kb,
-    warehouse_category_management_kb
+    warehouse_category_management_kb, warehouse_category_unified_management_kb,
+    warehouse_category_action_complete_kb, warehouse_products_with_stock_kb,
+    warehouse_out_of_stock_products_kb, warehouse_stock_summary_kb,
+    warehouse_category_products_with_stock_kb, warehouse_quick_stock_select_kb
 )
 from services.warehouse_service import WarehouseService
 
@@ -469,7 +472,7 @@ async def confirm_give_product(callback: CallbackQuery, state: FSMContext, sessi
     
     await callback.message.edit_text(
         success_text,
-        reply_markup=warehouse_product_action_complete_kb(category_id, action_type="give")
+        reply_markup=warehouse_category_action_complete_kb(category_id, action_type="give")
     )
     
     # Уведомление пользователю
@@ -947,7 +950,7 @@ async def confirm_mass_add(callback: CallbackQuery, state: FSMContext, session: 
         
         await callback.message.edit_text(
             success_text,
-            reply_markup=warehouse_product_action_complete_kb(category_id, action_type="add")
+            reply_markup=warehouse_category_action_complete_kb(category_id, action_type="add")
         )
         
         logger.info(f"WAREHOUSE: Mass added {len(products)} products by admin {callback.from_user.id}. "
@@ -1344,7 +1347,7 @@ async def confirm_quick_give_product(callback: CallbackQuery, state: FSMContext,
     
     await callback.message.edit_text(
         success_text,
-        reply_markup=warehouse_product_action_complete_kb(category_id, action_type="give")
+        reply_markup=warehouse_category_action_complete_kb(category_id, action_type="give")
     )
     
     # Уведомление пользователю
@@ -1911,7 +1914,7 @@ async def confirm_edit_product(callback: CallbackQuery, state: FSMContext, sessi
         
         await callback.message.edit_text(
             success_text,
-            reply_markup=warehouse_product_action_complete_kb(category_id, action_type="edit")
+            reply_markup=warehouse_category_action_complete_kb(category_id, action_type="edit")
         )
         
         logger.info(f"WAREHOUSE: Product {product_id} edited by admin {callback.from_user.id}")
@@ -2062,7 +2065,7 @@ async def confirm_delete_product(callback: CallbackQuery, session: AsyncSession)
         
         await callback.message.edit_text(
             success_text,
-            reply_markup=warehouse_product_action_complete_kb(category_id, action_type="delete")
+            reply_markup=warehouse_category_action_complete_kb(category_id, action_type="delete")
         )
         
         # Отправляем уведомление об успехе
@@ -2747,15 +2750,101 @@ async def warehouse_manage_category_callback(callback: CallbackQuery, session: A
         
         text += f"💡 <b>Выберите действие:</b>"
         
-        await callback.message.edit_text(
-            text,
-            reply_markup=warehouse_category_management_kb(category_id)
-        )
-        await callback.answer()
+        # Перенаправляем на единое управление категорией
+        await warehouse_category_unified_management_handler(callback, session)
         
     except (ValueError, IndexError) as e:
         logger.error(f"Error in warehouse_manage_category_callback: {e}")
         await callback.answer("❌ Ошибка обработки категории", show_alert=True)
+
+
+# ========== ЕДИНОЕ УПРАВЛЕНИЕ КАТЕГОРИЕЙ ==========
+
+@warehouse_router.callback_query(F.data.startswith("warehouse_category_management_"))
+async def warehouse_category_unified_management_handler(callback: CallbackQuery, session: AsyncSession):
+    """Единое меню управления категорией - товары + действия + статистика"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    try:
+        # Парсим callback: warehouse_category_management_{category_id}_{page}
+        parts = callback.data.split("_")
+        category_id = int(parts[3])
+        page = int(parts[4]) if len(parts) > 4 else 0
+        
+        warehouse_service = WarehouseService(session)
+        
+        # Получаем категорию
+        category = await warehouse_service.get_category_by_id(category_id)
+        if not category:
+            await callback.answer("❌ Категория не найдена", show_alert=True)
+            return
+        
+        # Получаем товары в категории
+        products = await warehouse_service.get_products_by_category(category_id)
+        
+        # Считаем статистику
+        total_products = len(products)
+        available_products = sum(1 for p in products if p.is_unlimited or p.stock_quantity > 0)
+        total_stock = sum(p.stock_quantity for p in products if not p.is_unlimited)
+        unlimited_count = sum(1 for p in products if p.is_unlimited)
+        
+        # Формируем отображение остатков
+        stock_display = ""
+        if unlimited_count > 0:
+            stock_display += f"∞x{unlimited_count}"
+        if total_stock > 0:
+            if stock_display:
+                stock_display += f" + {total_stock}"
+            else:
+                stock_display = str(total_stock)
+        if not stock_display:
+            stock_display = "0"
+        
+        # Формируем текст сообщения
+        per_page = 10
+        total_pages = (len(products) + per_page - 1) // per_page if products else 1
+        start = page * per_page
+        end = min(start + per_page, len(products))
+        
+        text = (
+            f"🎛 <b>Управление категорией: {category.name}</b>\n\n"
+            f"📊 <b>Статистика:</b>\n"
+            f"• Всего товаров: <b>{total_products}</b>\n"
+            f"• Доступно: <b>{available_products}</b>\n"
+            f"• Остаток: <b>{stock_display}</b> шт.\n"
+        )
+        
+        if category.description:
+            text += f"• Описание: {category.description}\n"
+        
+        if products:
+            if total_pages > 1:
+                text += f"\n📄 <b>Страница {page + 1} из {total_pages}</b>\n"
+                text += f"📋 Показано: {end - start} из {total_products} товаров\n\n"
+            else:
+                text += f"\n📋 <b>Товары в категории:</b>\n"
+            
+            text += "💡 <i>Нажмите на товар для подробных действий</i>"
+        else:
+            text += "\n❌ <b>Товары отсутствуют</b>\n"
+            text += "💡 Добавьте первые товары в категорию"
+        
+        await callback.message.edit_text(
+            text,
+            reply_markup=warehouse_category_unified_management_kb(
+                products, category_id, category.name, page, per_page
+            )
+        )
+        await callback.answer()
+        
+    except (ValueError, IndexError) as e:
+        logger.error(f"Error parsing callback in warehouse_category_unified_management_handler: {e}")
+        await callback.answer("❌ Ошибка обработки данных", show_alert=True)
+    except Exception as e:
+        logger.error(f"Error in warehouse_category_unified_management_handler: {e}")
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
 
 
 # ========== ЗАГЛУШКИ ДЛЯ СТАТИСТИКИ И МАССОВЫХ ОПЕРАЦИЙ ==========
@@ -2784,5 +2873,434 @@ async def warehouse_delete_category_callback(callback: CallbackQuery):
     await callback.answer("🚧 Удаление категорий в разработке!", show_alert=True)
 
 
+# ========== ЗАГЛУШКА ДЛЯ НЕАКТИВНЫХ КНОПОК ==========
+
+@warehouse_router.callback_query(F.data == "noop")
+async def noop_callback(callback: CallbackQuery):
+    """Заглушка для неактивных кнопок (разделители)"""
+    await callback.answer()
+
+
 # Обработчик удален - не должен перехватывать все сообщения
 # Все FSM состояния имеют свои специфичные обработчики
+
+# ========== ОБРАБОТЧИКИ ДЛЯ РАБОТЫ С ОСТАТКАМИ ==========
+
+@warehouse_router.callback_query(F.data == "warehouse_products_with_stock")
+async def warehouse_products_with_stock_callback(callback: CallbackQuery, session: AsyncSession):
+    """Показать товары с остатками"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    try:
+        warehouse_service = WarehouseService(session)
+        products = await warehouse_service.get_all_products()
+        
+        if not products:
+            await callback.message.edit_text(
+                "❌ Товары не найдены",
+                reply_markup=back_to_warehouse_kb()
+            )
+            await callback.answer()
+            return
+        
+        # Используем новую клавиатуру для товаров с остатками
+        from keyboards.warehouse_keyboards import warehouse_products_with_stock_kb
+        
+        await callback.message.edit_text(
+            "🟢 <b>Товары с остатками</b>\n\n"
+            "Выберите товар для просмотра или выдачи:",
+            reply_markup=warehouse_products_with_stock_kb(products, page=0)
+        )
+        await callback.answer()
+        
+    except Exception as e:
+        logger.error(f"Error in warehouse_products_with_stock_callback: {e}")
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
+
+
+@warehouse_router.callback_query(F.data.startswith("warehouse_products_stock_page_"))
+async def warehouse_products_stock_page_callback(callback: CallbackQuery, session: AsyncSession):
+    """Пагинация для товаров с остатками"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    try:
+        page = int(callback.data.split("_")[-1])
+        warehouse_service = WarehouseService(session)
+        products = await warehouse_service.get_all_products()
+        
+        from keyboards.warehouse_keyboards import warehouse_products_with_stock_kb
+        
+        await callback.message.edit_text(
+            "🟢 <b>Товары с остатками</b>\n\n"
+            "Выберите товар для просмотра или выдачи:",
+            reply_markup=warehouse_products_with_stock_kb(products, page=page)
+        )
+        await callback.answer()
+        
+    except Exception as e:
+        logger.error(f"Error in warehouse_products_stock_page_callback: {e}")
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
+
+
+@warehouse_router.callback_query(F.data == "warehouse_show_out_of_stock")
+async def warehouse_show_out_of_stock_callback(callback: CallbackQuery, session: AsyncSession):
+    """Показать товары без остатков"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    try:
+        warehouse_service = WarehouseService(session)
+        products = await warehouse_service.get_all_products()
+        
+        if not products:
+            await callback.message.edit_text(
+                "❌ Товары не найдены",
+                reply_markup=back_to_warehouse_kb()
+            )
+            await callback.answer()
+            return
+        
+        # Используем клавиатуру для товаров без остатков
+        from keyboards.warehouse_keyboards import warehouse_out_of_stock_products_kb
+        
+        await callback.message.edit_text(
+            "🔴 <b>Товары без остатков</b>\n\n"
+            "Эти товары закончились и требуют пополнения:",
+            reply_markup=warehouse_out_of_stock_products_kb(products, page=0)
+        )
+        await callback.answer()
+        
+    except Exception as e:
+        logger.error(f"Error in warehouse_show_out_of_stock_callback: {e}")
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
+
+
+@warehouse_router.callback_query(F.data.startswith("warehouse_out_of_stock_page_"))
+async def warehouse_out_of_stock_page_callback(callback: CallbackQuery, session: AsyncSession):
+    """Пагинация для товаров без остатков"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    try:
+        page = int(callback.data.split("_")[-1])
+        warehouse_service = WarehouseService(session)
+        products = await warehouse_service.get_all_products()
+        
+        from keyboards.warehouse_keyboards import warehouse_out_of_stock_products_kb
+        
+        await callback.message.edit_text(
+            "🔴 <b>Товары без остатков</b>\n\n"
+            "Эти товары закончились и требуют пополнения:",
+            reply_markup=warehouse_out_of_stock_products_kb(products, page=page)
+        )
+        await callback.answer()
+        
+    except Exception as e:
+        logger.error(f"Error in warehouse_out_of_stock_page_callback: {e}")
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
+
+
+@warehouse_router.callback_query(F.data.startswith("warehouse_category_products_with_stock_"))
+async def warehouse_category_products_with_stock_callback(callback: CallbackQuery, session: AsyncSession):
+    """Показать товары категории с остатками"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    try:
+        # Парсим category_id и page из callback_data
+        parts = callback.data.split("_")
+        category_id = int(parts[-2])
+        page = int(parts[-1])
+        
+        warehouse_service = WarehouseService(session)
+        category = await warehouse_service.get_category_by_id(category_id)
+        products = await warehouse_service.get_products_by_category(category_id)
+        
+        if not category:
+            await callback.answer("❌ Категория не найдена", show_alert=True)
+            return
+        
+        from keyboards.warehouse_keyboards import warehouse_category_products_with_stock_kb
+        
+        await callback.message.edit_text(
+            f"📂 <b>{category.name}</b>\n\n"
+            "Товары с остатками в категории:",
+            reply_markup=warehouse_category_products_with_stock_kb(
+                products, category_id, category.name, page
+            )
+        )
+        await callback.answer()
+        
+    except Exception as e:
+        logger.error(f"Error in warehouse_category_products_with_stock_callback: {e}")
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
+
+
+@warehouse_router.callback_query(F.data.startswith("warehouse_category_stock_page_"))
+async def warehouse_category_stock_page_callback(callback: CallbackQuery, session: AsyncSession):
+    """Пагинация для товаров категории с остатками"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    try:
+        # Парсим category_id и page из callback_data
+        parts = callback.data.split("_")
+        category_id = int(parts[-2])
+        page = int(parts[-1])
+        
+        warehouse_service = WarehouseService(session)
+        category = await warehouse_service.get_category_by_id(category_id)
+        products = await warehouse_service.get_products_by_category(category_id)
+        
+        if not category:
+            await callback.answer("❌ Категория не найдена", show_alert=True)
+            return
+        
+        from keyboards.warehouse_keyboards import warehouse_category_products_with_stock_kb
+        
+        await callback.message.edit_text(
+            f"📂 <b>{category.name}</b>\n\n"
+            "Товары с остатками в категории:",
+            reply_markup=warehouse_category_products_with_stock_kb(
+                products, category_id, category.name, page
+            )
+        )
+        await callback.answer()
+        
+    except Exception as e:
+        logger.error(f"Error in warehouse_category_stock_page_callback: {e}")
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
+
+
+@warehouse_router.callback_query(F.data.startswith("warehouse_product_out_of_stock_"))
+async def warehouse_product_out_of_stock_callback(callback: CallbackQuery, session: AsyncSession):
+    """Обработчик для товаров без остатков"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    try:
+        product_id = int(callback.data.split("_")[-1])
+        warehouse_service = WarehouseService(session)
+        product = await warehouse_service.get_product_by_id(product_id)
+        
+        if not product:
+            await callback.answer("❌ Товар не найден", show_alert=True)
+            return
+        
+        # Показываем информацию о товаре без остатков
+        text = f"🔴 <b>{product.name}</b>\n\n"
+        text += f"💰 Цена: <b>{product.price:.2f}₽</b>\n"
+        text += f"📂 Категория: <b>{product.category.name}</b>\n"
+        text += f"📦 Остаток: <b>0</b> (закончился)\n"
+        text += f"📊 Продано: <b>{product.total_sold}</b>\n\n"
+        text += "💡 <i>Этот товар закончился и требует пополнения остатков</i>"
+        
+        from keyboards.warehouse_keyboards import warehouse_error_recovery_kb
+        
+        await callback.message.edit_text(
+            text,
+            reply_markup=warehouse_error_recovery_kb(
+                category_id=product.category_id,
+                action_type="add_stock"
+            )
+        )
+        await callback.answer()
+        
+    except Exception as e:
+        logger.error(f"Error in warehouse_product_out_of_stock_callback: {e}")
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
+
+
+@warehouse_router.callback_query(F.data == "warehouse_stock_summary")
+async def warehouse_stock_summary_callback(callback: CallbackQuery, session: AsyncSession):
+    """Показать сводку по остаткам"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    try:
+        warehouse_service = WarehouseService(session)
+        categories = await warehouse_service.get_categories()
+        
+        # Подготавливаем статистику по категориям
+        category_stats = []
+        for category in categories:
+            products = await warehouse_service.get_products_by_category(category.id)
+            
+            available_products = sum(1 for p in products if p.is_unlimited or p.stock_quantity > 0)
+            out_of_stock_products = sum(1 for p in products if not p.is_unlimited and p.stock_quantity <= 0)
+            total_stock = sum(p.stock_quantity for p in products if not p.is_unlimited)
+            
+            category_stats.append({
+                'id': category.id,
+                'name': category.name,
+                'available_products': available_products,
+                'out_of_stock_products': out_of_stock_products,
+                'total_stock': total_stock
+            })
+        
+        from keyboards.warehouse_keyboards import warehouse_stock_summary_kb
+        
+        await callback.message.edit_text(
+            "📊 <b>Сводка по остаткам</b>\n\n"
+            "Обзор товаров по категориям:",
+            reply_markup=warehouse_stock_summary_kb(category_stats)
+        )
+        await callback.answer()
+        
+    except Exception as e:
+        logger.error(f"Error in warehouse_stock_summary_callback: {e}")
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
+
+
+@warehouse_router.callback_query(F.data.startswith("warehouse_category_stock_summary_"))
+async def warehouse_category_stock_summary_callback(callback: CallbackQuery, session: AsyncSession):
+    """Показать сводку по остаткам конкретной категории"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    try:
+        category_id = int(callback.data.split("_")[-1])
+        warehouse_service = WarehouseService(session)
+        category = await warehouse_service.get_category_by_id(category_id)
+        products = await warehouse_service.get_products_by_category(category_id)
+        
+        if not category:
+            await callback.answer("❌ Категория не найдена", show_alert=True)
+            return
+        
+        # Подготавливаем статистику
+        available_products = [p for p in products if p.is_unlimited or p.stock_quantity > 0]
+        out_of_stock_products = [p for p in products if not p.is_unlimited and p.stock_quantity <= 0]
+        total_stock = sum(p.stock_quantity for p in products if not p.is_unlimited)
+        
+        text = f"📊 <b>Сводка по остаткам: {category.name}</b>\n\n"
+        text += f"📦 Всего товаров: <b>{len(products)}</b>\n"
+        text += f"🟢 Доступно: <b>{len(available_products)}</b>\n"
+        text += f"🔴 Закончилось: <b>{len(out_of_stock_products)}</b>\n"
+        text += f"📊 Общий остаток: <b>{total_stock}</b> шт.\n\n"
+        
+        if available_products:
+            text += "🟢 <b>Доступные товары:</b>\n"
+            for product in available_products[:5]:  # Показываем первые 5
+                stock_info = "∞" if product.is_unlimited else str(product.stock_quantity)
+                text += f"• {product.name} ({stock_info} шт.)\n"
+            
+            if len(available_products) > 5:
+                text += f"• ... и еще {len(available_products) - 5} товаров\n"
+        
+        if out_of_stock_products:
+            text += "\n🔴 <b>Закончившиеся товары:</b>\n"
+            for product in out_of_stock_products[:3]:  # Показываем первые 3
+                text += f"• {product.name}\n"
+            
+            if len(out_of_stock_products) > 3:
+                text += f"• ... и еще {len(out_of_stock_products) - 3} товаров\n"
+        
+        from keyboards.warehouse_keyboards import warehouse_error_recovery_kb
+        
+        await callback.message.edit_text(
+            text,
+            reply_markup=warehouse_error_recovery_kb(
+                category_id=category_id,
+                action_type="stock_summary"
+            )
+        )
+        await callback.answer()
+        
+    except Exception as e:
+        logger.error(f"Error in warehouse_category_stock_summary_callback: {e}")
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
+
+
+@warehouse_router.callback_query(F.data == "warehouse_add_stock")
+async def warehouse_add_stock_callback(callback: CallbackQuery):
+    """Заглушка для добавления остатков"""
+    await callback.answer("🚧 Функция добавления остатков в разработке!", show_alert=True)
+
+
+@warehouse_router.callback_query(F.data == "warehouse_import_stock")
+async def warehouse_import_stock_callback(callback: CallbackQuery):
+    """Заглушка для импорта остатков"""
+    await callback.answer("🚧 Функция импорта остатков в разработке!", show_alert=True)
+
+
+@warehouse_router.callback_query(F.data == "warehouse_stock_notifications")
+async def warehouse_stock_notifications_callback(callback: CallbackQuery):
+    """Заглушка для настроек уведомлений об остатках"""
+    await callback.answer("🚧 Настройки уведомлений об остатках в разработке!", show_alert=True)
+
+
+@warehouse_router.callback_query(F.data == "warehouse_sales_stats")
+async def warehouse_sales_stats_callback(callback: CallbackQuery):
+    """Заглушка для статистики продаж"""
+    await callback.answer("🚧 Статистика продаж в разработке!", show_alert=True)
+
+
+@warehouse_router.callback_query(F.data == "warehouse_show_more_products")
+async def warehouse_show_more_products_callback(callback: CallbackQuery, session: AsyncSession):
+    """Показать больше товаров в быстром выборе"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    try:
+        warehouse_service = WarehouseService(session)
+        products = await warehouse_service.get_all_products()
+        
+        from keyboards.warehouse_keyboards import warehouse_quick_stock_select_kb
+        
+        await callback.message.edit_text(
+            "🎯 <b>Выбор товара для выдачи</b>\n\n"
+            "Выберите товар из списка:",
+            reply_markup=warehouse_quick_stock_select_kb(products, action="give")
+        )
+        await callback.answer()
+        
+    except Exception as e:
+        logger.error(f"Error in warehouse_show_more_products_callback: {e}")
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
+
+
+@warehouse_router.callback_query(F.data.startswith("warehouse_show_category_out_of_stock_"))
+async def warehouse_show_category_out_of_stock_callback(callback: CallbackQuery, session: AsyncSession):
+    """Показать товары без остатков в конкретной категории"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ У вас нет прав доступа", show_alert=True)
+        return
+    
+    try:
+        category_id = int(callback.data.split("_")[-1])
+        warehouse_service = WarehouseService(session)
+        category = await warehouse_service.get_category_by_id(category_id)
+        products = await warehouse_service.get_products_by_category(category_id)
+        
+        if not category:
+            await callback.answer("❌ Категория не найдена", show_alert=True)
+            return
+        
+        # Фильтруем только товары без остатков
+        out_of_stock_products = [p for p in products if not p.is_unlimited and p.stock_quantity <= 0]
+        
+        from keyboards.warehouse_keyboards import warehouse_out_of_stock_products_kb
+        
+        await callback.message.edit_text(
+            f"🔴 <b>Товары без остатков в категории: {category.name}</b>\n\n"
+            "Эти товары закончились и требуют пополнения:",
+            reply_markup=warehouse_out_of_stock_products_kb(out_of_stock_products, page=0, category_id=category_id)
+        )
+        await callback.answer()
+        
+    except Exception as e:
+        logger.error(f"Error in warehouse_show_category_out_of_stock_callback: {e}")
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
